@@ -210,10 +210,29 @@ Link speed measured at **~280 KB/s** — budget downloads in hours, not minutes.
 
 1. **wrench_13mm drops after the pick** (visible in `media/grasp_wrench_13mm.mp4`): lifts
    ~8.9 cm, then the tool leaves the jaws during the lift/retreat. Highest-priority grasp bug.
-2. **screwdriver 0/8.** Mixed `no_grip` and `no_lift`. Its box handle settles ~1 cm deeper into
-   the slot over the first seconds, so a plan made at reset goes stale; a re-point from the
-   pre-grasp pose was written but **not yet benchmarked** (it was the change in flight when the
-   session ended — verify `grasp_point` is re-evaluated before the descent).
+2. **screwdriver 0/8 — DIAGNOSED to the lift, not yet fixed (2026-09-18).**
+   The re-point fix from session 1 IS in and benchmarked: it helped tape_roll (3/8 -> 6/8) and
+   pliers (3/8 -> 4/8) but did nothing for the screwdriver. What the traces show:
+   - `site_err` ~1 mm, so pointing/IK are NOT the problem.
+   - The jaws DO grip the handle: both pads at 26-33 N, ~0 penetration. With pad friction 2.0
+     that is ~120 N of hold against a 0.7 N tool, so it cannot slip under its own weight.
+   - During the lift the hand rises 68 mm while the tool rises only 49 mm (~19 mm of slip),
+     `finger_b_pad` registers TWO contact points (the tool rocks), then both pads vanish at
+     once and the tool falls.
+   - The shaft needs **57 mm** of lift to clear the plates (shaft bottom 0.743, plate top
+     0.800). It escapes at **49 mm** — 8 mm short. Closing also pins the tool against
+     `rack_front` at 28 N.
+   - NOTE the `no_lift` threshold is 0.05 and these reach 0.049: they are LATE DROPS
+     mislabelled as `no_lift`. The stage breakdown for this tool is partly an artifact.
+   **Three hypotheses tested and REFUTED — do not repeat:** (a) jaws closing on the rack
+   plates (they contact `screwdriver_handle` directly); (b) square handle rolled ~45 deg so
+   the jaws meet its 35 mm diagonal (measured roll is only +-8 deg, effective width 26-28 mm;
+   wrenches/pliers sit at +-2 deg); (c) grasp height / squeeze depth (full sweep of
+   GRASP_Z 0.128/0.140/0.150 x squeeze -0.008/-0.016 gave 0/8 on ALL six, and raising the
+   grasp point collapses max lift from 160 mm to 2 mm).
+   One seed DOES lift it 160 mm clear before losing it on the retreat, so extraction is
+   possible and the grasp is simply not repeatable. Next candidates: rack/slot geometry for
+   this tool, or the shaft's 45 mm of engagement between the plates.
 3. **pliers / tape_roll ~3/8**, both mostly `dropped`.
 4. `controller.py` (numpy Layer 3) has never been run against the MJX env — the observation
    must be verified bit-for-bit against `Go2ArmEnv._single_obs` before trusting it.
