@@ -117,6 +117,10 @@ class Go2ArmEnv(Go2StairsEnv):
         assert mj.nu == N_LEG + N_ARM_CTRL
         # qpos: 7 free + 12 legs + 6 arm joints + 2 finger slides
         assert mj.nq == 7 + N_LEG + 8, mj.nq
+        # The arm makes the stock iterations=1 solver diverge (see bw/sim/build_models.py).
+        assert mj.opt.iterations >= 4 and mj.opt.ls_iterations >= 10, (
+            f"solver too weak for the arm model: iterations={mj.opt.iterations}, "
+            f"ls_iterations={mj.opt.ls_iterations}; rebuild with bw.sim.build_models")
 
         key = mj.key("home").id
         self._nu = N_LEG

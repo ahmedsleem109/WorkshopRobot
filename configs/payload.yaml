@@ -6,8 +6,12 @@
 # back_margin 100: with turning commands, walking back down the platform is legitimate.
 run_name: payload
 env_class: stairs
-rest_every_s: 7200
-rest_seconds: 300
+# MEASURED 2026-09-18: 4096 envs on the arm model drives the RTX 3060 Laptop to the 88 C stop
+# line (STATUS.md "Environment") in 20 MINUTES at 100% util. The old 7200 s interval meant the
+# first cooldown arrived ~100 min after the card was already over its limit. 900/120 rests
+# before the ceiling instead of after it, at the cost of ~13% wall clock (~12 h -> ~14 h).
+rest_every_s: 900
+rest_seconds: 120
 scene: unused-generated-by-env
 init_params: /home/sleem/go2-stairs/results/2026-08-06_17-17-05-stairs_run7/checkpoints/final
 network:

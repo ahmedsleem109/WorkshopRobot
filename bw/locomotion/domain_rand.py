@@ -4,7 +4,7 @@ Differs from go2-stairs' envs/domain_rand.py in three ways:
 * PD-gain scaling touches the 12 LEG actuators only -- scaling the Z1's kp=1000 servos
   would randomize the arm command tracking, which is not a locomotion disturbance.
 * The trunk payload range drops from 0-3 kg to 0-0.5 kg: the arm is now the payload.
-* Carry-load robustness (plan Phase 1 stretch): 0-1 kg added to the gripper finger body,
+* Carry-load robustness (plan Phase 1 stretch): 0-1 kg added to the gripper base body,
   i.e. a held object whose mass the policy never observes.
 """
 
@@ -35,7 +35,11 @@ def _foot_geoms(m):
 def make_randomization_fn(mj_model: mujoco.MjModel, held_mass=HELD_MASS):
     feet = jp.array(_foot_geoms(mj_model))
     base = mj_model.body("base").id
-    hand = mj_model.body("arm_gripperMover").id
+    # The held object's mass goes on the gripper BASE, not on a finger: the fingers are 0.09 kg
+    # slider bodies and loading them would randomize the finger servo dynamics, which is not a
+    # locomotion disturbance (same reason the leg-only PD scaling above excludes the arm).
+    # (Was "arm_gripperMover" -- build_models.py deletes that body in the parallel-jaw swap.)
+    hand = mj_model.body("arm_link06").id
 
     def randomize(sys, rng):
         @jax.vmap

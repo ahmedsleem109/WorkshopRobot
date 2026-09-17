@@ -1,7 +1,7 @@
 <mujoco model="go2">
   <compiler angle="radian" meshdir="assets/"/>
 
-  <option impratio="100" iterations="1" ls_iterations="5"/>
+  <option impratio="100" iterations="4" ls_iterations="10"/>
 
   <size nkey="3"/>
 

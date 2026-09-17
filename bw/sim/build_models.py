@@ -45,6 +45,12 @@ ARM_MOUNT = (0.06, 0.0, 0.057 + PEDESTAL_H)
 # Gripper command is now the finger travel of a PARALLEL jaw: 0 = closed, FINGER_TRAVEL = open.
 FINGER_TRAVEL = 0.038
 GRIP_OVERSHOOT = 0.008
+# Jaw-pad contact time constant, = 1*model timestep (workshop.xml runs the MuJoCo default
+# dt=0.002). MEASURED 2026-09-18: raising this to 0.004 (the usual ">= 2*dt" guidance) did NOT
+# fix the "Nan/Inf in QACC at DOF 29-48" warnings -- they recurred at the IDENTICAL episode
+# times -- and cost 7 points of grasp success (57% -> 50%, tape_roll 6/8 -> 3/8). The pad
+# contact is therefore NOT the instability source; do not re-try this without new evidence.
+PAD_SOLREF_T = 0.002
 ARM_STOWED = (0.0, 0.0, -0.05, 0.0, 0.0, 0.0, 0.0)
 ARM_EXTENDED = (0.0, 1.35, -0.45, -0.9, 0.0, 0.0, 0.03)
 ARM_READY = (0.0, 0.9, -1.2, 0.3, 0.0, 0.0, 0.035)
@@ -125,7 +131,7 @@ def _base_spec() -> mujoco.MjSpec:
                    # Stiff, barely-penetrating contact. With MuJoCo's default softness the
                    # pads sank 3.5 mm into a 13 mm handle under 25 N and extruded the tool
                    # out of the jaws during the retreat.
-                   solref=[0.002, 1.0], solimp=[0.995, 0.9995, 0.0002, 0.5, 2.0],
+                   solref=[PAD_SOLREF_T, 1.0], solimp=[0.995, 0.9995, 0.0002, 0.5, 2.0],
                    contype=2, conaffinity=2, group=2)
         f.add_geom(name=f"finger_{tag}_back", type=mujoco.mjtGeom.mjGEOM_BOX,
                    size=[0.012, 0.013, 0.012], pos=[0.008, 0.0, sign * 0.012],
@@ -180,6 +186,12 @@ def _add_keys(spec: mujoco.MjSpec, model: mujoco.MjModel):
 
 def build_robot(mjx_variant: bool) -> mujoco.MjSpec:
     spec = _base_spec()
+    if mjx_variant:
+        # MEASURED (scripts/solver_sweep.py): menagerie ships iterations=1, which is fine for a
+        # 15 kg Go2 but diverged 24.7% of MJX training terminations once the arm put 19.9 kg over
+        # a higher CoM. it=4 / ls=10 gives 0.0% at 2,030 steps/s; it=2 still leaves 5.2%.
+        spec.option.iterations = 4
+        spec.option.ls_iterations = 10
     for g in _arm_geoms(spec):
         if mjx_variant or g.classname.name.endswith("visual"):
             g.contype = 0
@@ -200,7 +212,7 @@ def build_robot(mjx_variant: bool) -> mujoco.MjSpec:
             g.condim = 6 if is_pad else 3
             g.friction = [2.0, 0.25, 0.02] if is_pad else [0.8, 0.02, 0.002]   # rubber jaw pads
             if is_pad:
-                g.solref = [0.002, 1.0]
+                g.solref = [PAD_SOLREF_T, 1.0]
                 g.solimp = [0.995, 0.9995, 0.0002, 0.5, 2.0]
     model = spec.compile()
     _add_keys(spec, model)
