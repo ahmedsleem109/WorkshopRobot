@@ -137,9 +137,12 @@ compromise. They must appear in the README and the write-up.
   inside WSL (go2-stairs HANDOFF §Known-broken). Pattern: roll out in WSL → dump `.npz` →
   render on Windows.
 - **Models**: `lerobot/smolvla_base` → `~/bringwrench/models/smolvla_base` (873 MB, **done**).
-  `allenai/Molmo2-ER` → `/mnt/c/hf_cache/Molmo2-ER` (19.4 GB fp32, **3.2 GB done, resume it** —
-  `ops/resume_molmo.sh`; it goes to C: because the WSL disk lives on D: with ~28 GB free, and
-  only a 4-bit copy should ever land on ext4).
+  `allenai/Molmo2-ER` → `/mnt/c/hf_cache/Molmo2-ER`, **abandoned at 3.2 of 19.4 GB on purpose**:
+  every Ai2 Molmo2 repo ships F32, so that download carries a 4.85B model that needs ~3.2 GB in
+  4-bit, and ER's edge is embodied reasoning — which this architecture replaces with the
+  hand-written state machine. `REMAINING.md` T0 lists the replacements
+  (`Cycl0/Molmo2-VideoPoint-4B-bnb-4bit` 3.7 GB, `reubk/Molmo2-4B-GGUF` q4 3.6 GB,
+  `Qwen/Qwen3-VL-4B-Instruct` 8.9 GB bf16) and the ground-truth bake-off that picks one.
 - **GPU**: RTX 3060 Laptop, 6 GB, board power limit locked. 4096 envs with the arm model fits
   (~4.9 GB). Never stack GPU jobs. `rest_every_s: 7200 / rest_seconds: 300` duty cycle is on in
   `configs/payload.yaml`. Watch temperature: 86–87 °C was reached on this card in Phase 2 of the
@@ -170,7 +173,9 @@ compromise. They must appear in the README and the write-up.
    must be verified bit-for-bit against `Go2ArmEnv._single_obs` before trusting it.
 5. `eval_phase1.py` has never been executed; expect API friction on first run.
 6. The Molmo pointing output format (how points are encoded, coordinate scale) is **not yet
-   confirmed** — the HF model card does not document it; check `allenai/molmo2` on GitHub.
+   confirmed** — the HF model card does not document it; check `allenai/molmo2` on GitHub. The
+   grounding model itself is not settled: `REMAINING.md` T0 holds the candidates and the
+   bake-off that decides, scored against sim ground truth.
 7. Tool geometry is primitive (boxes/capsules/a 16-segment ring). Fine for physics, but the
    10 mm vs 13 mm distinction leans on a coloured grip band plus size — check that Molmo and
    SmolVLA can actually separate them before trusting the "correct-wrench ≥80%" criterion.

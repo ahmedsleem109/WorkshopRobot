@@ -23,7 +23,7 @@ T1 grasp reliability >=90% ──┬── T2 two-table pick&place ──┬─�
 T3 payload locomotion run ───┴── T4 Phase 1 eval/ablation ─┘                                                │
                                                                                                             │
 T5 Layer 3 numpy controller validation ─────────────────────────────────────────────────────────────────────┤
-T0 ──> T8 Molmo grounding (locate) ─────────────────────────────────────────────────────────────────────────┤
+T0 ──> T8 grounding: locate()      ─────────────────────────────────────────────────────────────────────────┤
                                                                                                             ▼
                                                                           T9 orchestrator (nav/pick/place/recover)
                                                                                      │
@@ -39,20 +39,51 @@ then work on T1/T2 on CPU while it trains.
 
 ---
 
-## T0 — Resume the Molmo2-ER download `[blocks T8]` · 30 min, unattended
+## T0 — Pick and verify the grounding model `[blocks T8]` · ~2 h
 
-3.2 GB of 19.4 GB is in `/mnt/c/hf_cache/Molmo2-ER`. `hf download` resumes.
+**Decision (session 1, from HF API file sizes): do NOT finish the 19.4 GB Molmo2-ER download.**
+Every Ai2 Molmo2 repo ships **F32**, so 19.4 GB carries a 4.85B model that needs ~9.7 GB in
+bf16 and ~3.2 GB in 4-bit; half the download is discarded at quantization, against ~28 GB free
+on D:. And Molmo2-ER's advantage is embodied *reasoning* + tool orchestration, which this
+architecture deliberately does not use — the plan replaces it with the hand-written state
+machine and calls the VLM only through `vlm.point()`.
 
-- [ ] Run `ops/resume_molmo.sh` (already written) under a Windows Scheduled Task so it survives
-      the session; `HF_HUB_DISABLE_XET=1` is set in it because the xet transport failed with
-      `CAS Client Error: Format error: I/O error` at ~16 MB.
-- [ ] Then quantize to 4-bit **once** and save the small copy to ext4
-      (`~/bringwrench/models/molmo2er-4bit`, ~3.5 GB); keep the fp32 copy on C: only until the
-      4-bit copy loads correctly, then free it. Disk is the constraint: D: has ~28 GB free.
-- [ ] Confirm the pointing output format from `github.com/allenai/molmo2`
-      (`MOLMO_POINT_README.md`) — the HF card does not document it. Record it in `STATUS.md`.
+| Candidate | Download | ~VRAM 4-bit | Note |
+|---|---|---|---|
+| `Cycl0/Molmo2-VideoPoint-4B-bnb-4bit` | **3.7 GB** | ~3.7 GB | already 4-bit (bitsandbytes, CUDA-only — fine here), pointing specialist, ships `modeling_molmo2.py` |
+| `reubk/Molmo2-4B-GGUF` (`q4_k_m` + `mmproj-f16`) | **3.6 GB** | ~3.5 GB | llama.cpp path -> GBNF grammar-constrained output, the plan's tool-parse fallback |
+| `Qwen/Qwen3-VL-4B-Instruct` | 8.9 GB bf16 | ~3 GB | general-purpose baseline; the better default for OTHER projects |
+| `allenai/Molmo2-ER` | 19.4 GB F32 | ~3.2 GB | only if the ER-vs-state-machine comparison (plan's Phase 3 stretch) is actually attempted |
+| `allenai/MolmoPoint-Vid-4B` | 19.5 GB F32 | ~3.2 GB | Ai2's grounding-token pointing architecture, same F32 tax |
 
----
+Both small candidates are **community mirrors** (single uploader, a few hundred downloads), so
+they are unverified — cheap to settle here, because sim hands us exact ground-truth poses.
+
+- [ ] **T0.1** Download `Cycl0/Molmo2-VideoPoint-4B-bnb-4bit` (3.7 GB) and the GGUF q4 pair
+      (3.6 GB) into `~/bringwrench/models/`. Keep the partial ER download on C: until a
+      candidate passes T0.3, then delete it.
+- [ ] **T0.2** Confirm the pointing output format from `github.com/allenai/molmo2`
+      (`MOLMO_POINT_README.md`): how points are encoded in the text, and the coordinate scale.
+      The HF model card does not document it. Record it in `STATUS.md`.
+- [ ] **T0.3 Bake-off on our own renders, scored against ground truth** — the decisive test.
+      For each candidate: 200 wrist-camera views from `WorkshopSim` with randomized pose,
+      lighting and clutter; report **median pixel error**, **median 3D error after the depth
+      lookup**, **miss rate**, **latency per call**, and above all **10 mm vs 13 mm wrench
+      discrimination** — the one distinction the whole task depends on, and the hardest for
+      any of these models, since the two wrenches differ mainly in size plus a coloured band.
+- [ ] **T0.4** Keep the winner behind `vlm.point(image, description) -> (u, v) | None` in a
+      separate process, so swapping stays a one-file change (the plan's Layer 1 contract). If
+      none discriminates the wrenches reliably: (a) give the wrenches a clearer distinguishing
+      feature and document it, or (b) classical CV on the sim render — the plan's own cut line
+      — written up as a finding.
+
+`ops/resume_molmo.sh` / `ops/run_molmo_download.bat` remain if ER is ever wanted
+(`HF_HUB_DISABLE_XET=1` is set in them; the xet transport failed at ~16 MB).
+
+**For other projects (noted while we were here):** `Qwen3-VL-4B-Instruct` is the better
+general-purpose default — bf16 weights (half the download of an F32 Molmo) and much wider
+tooling (vLLM, quantization, fine-tuning recipes). Keep a Molmo pointing model only for
+grounding-specific work.
 
 ## T1 — Grasp demonstrator to ≥90% per tool `[blocks T2, T6]` · the first real work
 
@@ -214,10 +245,11 @@ Targets: grasp ≥70%, correct-wrench ≥80% (plan's gate), transfer ≥60% as t
 
 ---
 
-## T8 — Molmo grounding, `locate()` `[needs T0]`
+## T8 — Grounding: `locate()` `[needs T0]`
 
 - [ ] `vlm.point(image, description) -> (u, v) | None` behind one function, separate process,
-      4-bit, **never inside a control loop** (2–5 s per call).
+      4-bit, **never inside a control loop** (2–5 s per call). Model chosen in T0 — a 4-bit
+      pointing specialist, not Molmo2-ER, unless T0.3 says otherwise.
 - [ ] `locate(description) -> Pose3D | None`: point → wrist-camera depth lookup → camera frame →
       base frame. The **`None` case is required** (it drives the floor-sweep recovery).
 - [ ] Score grounding error against ground truth (sim gives it free): report median error and
@@ -279,3 +311,4 @@ Keep 1, 2 and 4 if time is short (the plan's own cut line):
 | session 1 | retreat 0.22 → 0.13 m, squeeze 12 → 8 mm past contact | 47% → 48% |
 | session 1 | rack slot gap 24 → 30 mm (screwdriver handle never seated) | 48% → **50%** |
 | session 1 | re-point at pre-grasp + 1.2 s settle | **not yet benchmarked (T1.2)** |
+| session 1 | grounding model: 4-bit pointing model (3.7 GB) chosen over Molmo2-ER (19.4 GB F32) | see T0 |
