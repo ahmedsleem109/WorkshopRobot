@@ -39,6 +39,32 @@ then work on T1/T2 on CPU while it trains.
 
 ---
 
+## Model roles — settled, do not relitigate
+
+Two distinct slots, two different models. Asked in session 1 whether Qwen3-VL-4B should be the
+fine-tuned model; the answer differs per slot.
+
+| Slot | Model | Fine-tuned? | Why |
+|---|---|---|---|
+| Layer 2 — manipulation (VLA) | **SmolVLA** (`SmolVLM2-500M` backbone + action expert, `chunk_size=50`, frozen vision encoder, `train_expert_only=true`) | **yes** — this is the centerpiece | ~0.9 GB bf16 so it can be co-resident with the grounding model on a 6 GB card; emits 50 actions per forward = 5 s of motion at 10 Hz, so no model sits inside the control loop; documented 50–200 demo range matches our data scale; 1–2 h fine-tune |
+| Layer 1 — grounding (VLM) | a 4-bit pointing model (T0) | **no**, by default | called 4–6 times per episode through `vlm.point()` only |
+
+**Why NOT a 4B VLM as the VLA** (e.g. Qwen3-VL-4B): (a) VRAM — grounding at 4-bit is
+~3.2–3.7 GB and a 4B VLA at 4-bit adds ~3.2 GB, over the 6 GB budget before MuJoCo's OpenGL
+and the desktop compositor; (b) it is a VLM, not a VLA — an action head, action tokenization
+and the chunked control loop would all have to be built and validated, which SmolVLA ships;
+(c) a 4B backbone on ~1k demos likely underperforms the 450M specialist at 10x the compute,
+and the compute budget is Kaggle's free 16 GB tier.
+
+**Where Qwen3-VL IS appropriate:** as the Layer-1 grounding model, and — as a conditional
+stretch — LoRA-fine-tuned on sim-generated point labels. Sim gives unlimited EXACT labels
+(ground-truth poses per render), which is the most reliable route to the 10 mm vs 13 mm
+discrimination. Conditions: only if T0.3's zero-shot bake-off fails that test, and prefer
+Qwen3-VL-**2B** (~1.7 GB at 4-bit) over the 4B, because at run time the grounding model shares
+the card with SmolVLA. The plan itself files "fine-tune the VLM for your scene" under [LATER].
+
+---
+
 ## T0 — Pick and verify the grounding model `[blocks T8]` · ~2 h
 
 **Decision (session 1, from HF API file sizes): do NOT finish the 19.4 GB Molmo2-ER download.**
@@ -224,6 +250,8 @@ Everything needed is in place; **the two bugs that would have wasted the run are
 
 ## T7 — Fine-tune SmolVLA properly `[needs T6]`
 
+Backbone choice is settled — see "Model roles" above. SmolVLA, not a 4B VLM.
+
 - [ ] **T7.1** Baseline run from `lerobot/smolvla_base` on the pick-only subset, to establish the
       pipeline and a reference number.
 - [ ] **T7.2** Full run on pick + transfer. Kaggle's free tier (~30 GPU h/week, 16 GB) is the
@@ -256,6 +284,11 @@ Targets: grasp ≥70%, correct-wrench ≥80% (plan's gate), transfer ≥60% as t
       miss rate. Do not feed ground truth into the pipeline.
 - [ ] Scan strategy: the gripper occludes the middle of the wrist view, so `locate` takes 2–3
       views at different `arm_joint1` offsets and merges.
+- [ ] **T8.6 (conditional stretch) fine-tune the grounding model** on sim-generated point
+      labels — LoRA on Qwen3-VL-2B/4B or the chosen Molmo pointer, using the unlimited exact
+      labels sim provides. Do this ONLY if T0.3 shows no zero-shot candidate separates the
+      10 mm from the 13 mm wrench. Overfitting to sim is acceptable here (the project is
+      simulation-only and says so), and it is a second fine-tuning result for the write-up.
 
 ---
 
