@@ -1,0 +1,118 @@
+# Phase 1 payload-aware fine-tune (Go2 + Z1). Inherits every value of go2-stairs'
+# configs/stairs.yaml (run 7), whose comments explain each weight; only the arm and the
+# single-step terrain are new. Warm start = stairs run 7 final (best eval reward 3849).
+# 60M steps: a fine-tune, not a retrain (plan: "Do NOT retrain from scratch").
+# cmd ranges widened + stand + resampling: the orchestrator stands to grasp and turns in place.
+# back_margin 100: with turning commands, walking back down the platform is legitimate.
+run_name: payload
+env_class: stairs
+rest_every_s: 7200
+rest_seconds: 300
+scene: unused-generated-by-env
+init_params: /home/sleem/go2-stairs/results/2026-08-06_17-17-05-stairs_run7/checkpoints/final
+network:
+  policy:
+  - 512
+  - 256
+  - 128
+  value:
+  - 512
+  - 256
+  - 128
+ppo:
+  num_timesteps: 60000000
+  num_envs: 4096
+  episode_length: 1000
+  unroll_length: 20
+  batch_size: 256
+  num_minibatches: 16
+  num_updates_per_batch: 4
+  learning_rate: 0.0002
+  max_grad_norm: 1.0
+  entropy_cost: 0.01
+  discounting: 0.97
+  gae_lambda: 0.95
+  clipping_epsilon: 0.2
+  reward_scaling: 0.1
+  normalize_observations: true
+  num_evals: 25
+  num_eval_envs: 128
+  log_training_metrics: true
+  seed: 0
+env:
+  n_frames: 10
+  action_scale: 0.5
+  episode_length: 1000
+  history_len: 5
+  n_steps: 1
+  run_max: 0.35
+  stair_width: 2.5
+  approach: 2.0
+  landing: 2.0
+  box_depth: 0.8
+  spawn_back: 2.0
+  cmd_vx:
+  - 0.0
+  - 0.9
+  cmd_vy:
+  - -0.2
+  - 0.2
+  cmd_wz:
+  - -0.6
+  - 0.6
+  level_init: 4
+  level_min: 3
+  promote_success: 0.65
+  demote_success: 0.25
+  success_ema_alpha: 0.05
+  flat_frac: 0.2
+  success_margin: 0.05
+  min_rel_height: 0.18
+  max_rel_height: 0.62
+  max_pitch: 0.6109
+  max_roll: 0.4363
+  back_margin: 100.0
+  w_progress: 2.0
+  progress_cap: 1.0
+  w_height_gain: 3.0
+  height_gain_cap: 0.5
+  w_clearance: 5.0
+  clearance_margin: 0.05
+  w_slip: 0.2
+  w_lin_vel: 3.0
+  w_ang_vel: 0.8
+  w_air_time: 1.0
+  air_time_threshold: 0.15
+  tracking_sigma: 0.25
+  w_torque: 0.0001
+  w_action_rate: 0.02
+  w_joint_vel: 0.0005
+  w_joint_acc: 5.0e-07
+  w_ang_damp: 0.05
+  w_joint_limit: 10.0
+  w_collision: 1.0
+  w_termination: 1.0
+  target_height: 0.28
+  w_orientation: 0.5
+  w_base_height: 0.5
+  dr_enable: true
+  latency_max: 1.0
+  noise_proj_grav: 0.05
+  noise_gyro: 0.2
+  noise_accel: 0.5
+  noise_joint_pos: 0.01
+  noise_joint_vel: 1.5
+  push_interval:
+  - 8.0
+  - 15.0
+  push_vel: 0.5
+  asymmetric: true
+  actor_privileged: true
+  arm_p_stowed: 0.35
+  arm_p_extended: 0.25
+  arm_speed: 1.2
+  w_arm_stab: 0.3
+  cross_margin: 0.4
+  cmd_stand_prob: 0.2
+  cmd_resample_s: 5.0
+  progress_min_vx: 0.2

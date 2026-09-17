@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+*.npz
+media/*.npz
+render_venv/
+.venv*/
