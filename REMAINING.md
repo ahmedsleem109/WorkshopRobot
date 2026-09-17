@@ -17,7 +17,7 @@ Standing rules for next session:
 ## Dependency graph
 
 ```
-T0 resume Molmo download ──────────────────────────────┐
+T0 choose + verify grounding model ────┐
 T1 grasp reliability >=90% ──┬── T2 two-table pick&place ──┬── T6 data collection ── T7 SmolVLA fine-tune ──┐
                              │                             │                                                │
 T3 payload locomotion run ───┴── T4 Phase 1 eval/ablation ─┘                                                │
