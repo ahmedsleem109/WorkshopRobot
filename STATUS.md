@@ -383,6 +383,55 @@ step_33013760, 10M steps (~1.5-3 h), so the gate geometry is inside the training
 
 ---
 
+## T0.3 ANSWERED (2026-09-18, session 3) -- Qwen3-VL-2B scored against ground truth
+
+200 wrist views at 512x512, dumped on Windows with the ground-truth pixel for every tool
+(`scripts/dump_wrist_views.py`, projection visually verified in `runs/t03_views/gt_check.png`),
+scored in the WSL torch venv (`scripts/qwen_bakeoff.py`). Visibility comes from the rendered
+DEPTH buffer, so a refusal on an occluded target is not charged to the model.
+
+- **Coordinate scale: 0-1000 NORMALISED, confirmed.** Median error read as raw pixels
+  **278.4 px**; read as `x/1000*W` **44.5 px**. Session 2's inference was right, and it is now
+  measured rather than guessed. `x_px = x/1000*W`.
+- **The target is occluded in 55 of 200 views (27.5%)** by the gripper, from the scan pose
+  alone. That is not a model failure -- it is the measurement that justifies T8's 2-3 view
+  scan strategy, and it explains session 2's "There are none." for the pliers.
+- **Latency 1.12 s median**, 4.26 GB VRAM in bf16. Comfortably out of the control loop.
+- Parsed a coordinate in 117/145 visible views; refused on 29 of 55 occluded ones.
+- Median error **44.5 px on a 512 px image (8.7% of frame)**; only 15% land within 25 px.
+
+### The wrench distinction: the model is at CHANCE on size, and 93% on colour
+
+Scored only on views where BOTH wrenches are visible, asking for each in turn so a model that
+always names the same one scores 50% (`scripts/qwen_prompt_ablation.py`, 254 queries each):
+
+| prompt | parsed | median err | correct wrench |
+|---|---|---|---|
+| "Point to the 10mm wrench... pixel coordinates" | 242/254 | 82.9 px | **50.0%** |
+| same, asking explicitly for 0-1000 normalised | 254/254 | 80.9 px | **52.4%** |
+| Qwen's own grounding format (JSON `bbox_2d`) | 254/254 | 224.6 px | **49.6%** |
+| **"the wrench with the blue/red grip band"** | 253/254 | **38.5 px** | **92.9%** |
+
+**Qwen3-VL-2B cannot separate a 10 mm from a 13 mm wrench by size** -- exactly chance, across
+three phrasings including the model's own native grounding format, so this is not a prompting
+artifact. Naming the coloured grip band takes it to **92.9%**, past the plan's 80%
+correct-wrench gate, and halves the pointing error as a side effect. The model is reading
+COLOUR, not size.
+
+**Decision (T0.4 option (a)): keep Qwen3-VL-2B, and give the size distinction a visible
+feature.** `vlm.point()` maps the size in the instruction to the band colour ("10mm" -> blue
+band, "13mm" -> red band). This is a real design choice with a real cost and must be stated as
+a limitation in the write-up: the size discrimination is carried by the scene's colour coding
+and a lookup in our code, NOT by the vision model. Colour-coded tools are ordinary in a
+workshop, and the alternative (T8.6, LoRA on sim point labels) stays available as a stretch --
+it is now a genuine option rather than a necessity, because the gate is met.
+
+Note the residual 38.5 px median error is still coarse -- roughly 7.5% of the frame -- so
+T8's depth lookup and multi-view merge have to absorb it. The demonstrator does not: it uses
+ground truth on purpose.
+
+---
+
 ## Known bugs and open questions
 
 1. **wrench_13mm drops after the pick** (visible in `media/grasp_wrench_13mm.mp4`): lifts

@@ -4,3 +4,4 @@ __pycache__/
 media/*.npz
 render_venv/
 .venv*/
+runs/

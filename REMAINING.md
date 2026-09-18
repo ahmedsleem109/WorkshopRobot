@@ -95,17 +95,23 @@ they are unverified — cheap to settle here, because sim hands us exact ground-
 - [ ] **T0.2** Confirm the pointing output format from `github.com/allenai/molmo2`
       (`MOLMO_POINT_README.md`): how points are encoded in the text, and the coordinate scale.
       The HF model card does not document it. Record it in `STATUS.md`.
-- [ ] **T0.3 Bake-off on our own renders, scored against ground truth** — the decisive test.
+- [x] **T0.3 DONE 2026-09-18 (session 3).** 200 views, scored against ground truth; full table
+      in `STATUS.md`. Scale is **0-1000 normalised** (44.5 px vs 278.4 px median), latency
+      1.12 s, 4.26 GB. **The model is at CHANCE (50/52/50%) on 10 mm vs 13 mm across three
+      phrasings including Qwen's own grounding format, and at 92.9% when the query names the
+      coloured grip band.** Original: Bake-off on our own renders, scored against ground truth.
       For each candidate: 200 wrist-camera views from `WorkshopSim` with randomized pose,
       lighting and clutter; report **median pixel error**, **median 3D error after the depth
       lookup**, **miss rate**, **latency per call**, and above all **10 mm vs 13 mm wrench
       discrimination** — the one distinction the whole task depends on, and the hardest for
       any of these models, since the two wrenches differ mainly in size plus a coloured band.
-- [ ] **T0.4** Keep the winner behind `vlm.point(image, description) -> (u, v) | None` in a
-      separate process, so swapping stays a one-file change (the plan's Layer 1 contract). If
-      none discriminates the wrenches reliably: (a) give the wrenches a clearer distinguishing
-      feature and document it, or (b) classical CV on the sim render — the plan's own cut line
-      — written up as a finding.
+- [ ] **T0.4 DECIDED, not yet implemented.** Option **(a)** is taken: keep Qwen3-VL-2B and let
+      `vlm.point()` map the size in the instruction to the grip-band colour ("10mm" -> blue,
+      "13mm" -> red), which clears the 80% correct-wrench gate at 92.9%. Still to do: put it
+      behind `vlm.point(image, description) -> (u, v) | None` in a separate process, so
+      swapping stays a one-file change (the plan's Layer 1 contract). The limitation must be
+      stated in the write-up: the size discrimination is carried by colour coding plus a
+      lookup in our code, not by the vision model.
 
 `ops/resume_molmo.sh` / `ops/run_molmo_download.bat` remain if ER is ever wanted
 (`HF_HUB_DISABLE_XET=1` is set in them; the xet transport failed at ~16 MB).
@@ -304,11 +310,13 @@ Targets: grasp ≥70%, correct-wrench ≥80% (plan's gate), transfer ≥60% as t
       miss rate. Do not feed ground truth into the pipeline.
 - [ ] Scan strategy: the gripper occludes the middle of the wrist view, so `locate` takes 2–3
       views at different `arm_joint1` offsets and merges.
-- [ ] **T8.6 (conditional stretch) fine-tune the grounding model** on sim-generated point
+- [ ] **T8.6 (conditional stretch, condition NOT triggered) fine-tune the grounding model** on sim-generated point
       labels — LoRA on Qwen3-VL-2B/4B or the chosen Molmo pointer, using the unlimited exact
       labels sim provides. Do this ONLY if T0.3 shows no zero-shot candidate separates the
       10 mm from the 13 mm wrench. Overfitting to sim is acceptable here (the project is
       simulation-only and says so), and it is a second fine-tuning result for the write-up.
+      **T0.3 (session 3) means this is now OPTIONAL:** zero-shot fails the wrench distinction
+      on size but clears the gate on colour, so the LoRA is an upside, not a rescue.
 
 ---
 
