@@ -216,7 +216,37 @@ execution — the "expect API friction" warning was wrong.
 | gate criterion | original (run 7) | payload-aware | |
 |---|---|---|---|
 | 1. walk 5 m flat, arm stowed, 20/20 | 20/20 | 20/20 | PASS (both — does NOT discriminate) |
-| 2. cross 12 cm step, arm extended, **0 falls**/20 | 1 crossed, 19 falls | **17 crossed, 3 falls** | **FAIL** |
+| 2. cross 12 cm step, arm extended, **0 falls**/20 | 3 crossed, 17 falls | **19 crossed, 1 fall** | **FAIL** |
+
+### Step-height sweep — THE result to publish (added 2026-09-18, gate re-run)
+
+Crossed / falls out of 20. Solver divergences are excluded from `falls` and counted separately
+(see `rollout`): a diverged episode is upright at normal ride height and is a simulator
+artifact, not the robot falling.
+
+| rise | payload-aware | original (run 7) |
+|---|---|---|
+| 0.06 m | **20 / 0** | 19 / 1 |
+| 0.08 m | **20 / 0** | 15 / 5 |
+| 0.10 m | **19 / 0** (1 diverged) | 2 / 18 |
+| 0.11 m | **19 / 0** (1 diverged) | 1 / 19 |
+| **0.12 m** | **19 / 1** | 3 / 17 |
+| 0.13 m | 9 / 11 | 3 / 17 |
+
+Zero falls through 0.11 m, one at 0.12 m, cliff at 0.13 m — against an original policy already
+collapsing at 0.10 m. **The cliff lands exactly where the trunk geometry predicts** (front
+sphere rides at ~0.118 m under this gait's ~13 deg pitch; see "the 3 gate-2 falls" below), so
+mechanism and measurement agree. That is a far stronger claim than a single pass/fail.
+
+NOTE the single-height number is NOISY: the same seed gave 3 falls on the first run and 1 on
+the second (MJX run-to-run nondeterminism). The SWEEP is the trustworthy artifact, not the
+0.12 m cell. The ablation, by contrast, reproduced all four cells exactly.
+
+**UNEXPLAINED, and reproducible:** original stowed 160 N < original extended 200 N. It repeated
+identically across both runs, so it is NOT grid noise — a policy that falls 17/20 crossing a
+step with the arm extended should not resist lateral pushes BETTER in that pose. Do not publish
+the ablation table until this is explained; the diagnostic is to record per-force recovery
+rates rather than just the monotone-envelope maximum.
 
 | max recoverable push | arm stowed | arm extended |
 |---|---|---|
@@ -295,10 +325,25 @@ step_33013760, 10M steps (~1.5-3 h), so the gate geometry is inside the training
 4. `controller.py` (numpy Layer 3) has never been run against the MJX env — the observation
    must be verified bit-for-bit against `Go2ArmEnv._single_obs` before trusting it.
 5. `eval_phase1.py` has never been executed; expect API friction on first run.
-6. The Molmo pointing output format (how points are encoded, coordinate scale) is **not yet
-   confirmed** — the HF model card does not document it; check `allenai/molmo2` on GitHub. The
-   grounding model itself is not settled: `REMAINING.md` T0 holds the candidates and the
-   bake-off that decides, scored against sim ground truth.
+6. **T0.2 ANSWERED, and both downloaded candidates are DEAD (2026-09-18).** Molmo2 emits points
+   as **special tokens**, not text — decoded by `extract_image_points` / `extract_video_points`
+   using preprocessor metadata, returning `(object_id, {image_num|timestamps}, pixel_x,
+   pixel_y)` (Ai2 `MOLMO_POINT_README.md`).
+   * `Cycl0/Molmo2-VideoPoint-4B-bnb-4bit`: ships **no pointing code at all** (0 point
+     functions across its 5 .py files; none of its 303 added tokens are point tokens), AND
+     fails to load on transformers 5.5.4 with three separate API breaks (processor kwargs
+     `image_use_col_tokens`; `AutoModelForCausalLM` does not accept `Molmo2Config` — the
+     auto_map says `AutoModelForImageTextToText`; `ROPE_INIT_FUNCTIONS['default']` KeyError).
+     NOTE its `processing_molmo2.py` carries a LOCAL PATCH for the first break and the backup
+     copy silently failed — re-download the file if a pristine copy is needed.
+   * `reubk/Molmo2-4B-GGUF`: premise invalid. It was wanted for GBNF grammar-constrained
+     output, but there is no text to constrain if points are special tokens.
+   Both are single-uploader community mirrors, so this does NOT condemn Molmo2 itself —
+   Ai2's official repos are untested, and `allenai/Molmo2-ER` sits at 15 of 19.4 GB in
+   `/mnt/c/hf_cache` if an official Molmo2 is wanted. Current fallback: `Qwen3-VL-2B-Instruct`
+   (official, bf16, TEXT coordinates, so the grammar option returns), downloading to
+   `~/bringwrench/models/qwen3-vl-2b`. The plan's own cut line (classical CV on sim renders)
+   remains available.
 8. **TRAP — all-zero rows in a training log are NOT divergence.** brax calls the SAME
    `progress_fn` from two producers: the evaluator (`eval/*` keys) and, when
    `log_training_metrics: true`, `EpisodeMetricsLogger` (`episode/*` keys only, every ~54 s).

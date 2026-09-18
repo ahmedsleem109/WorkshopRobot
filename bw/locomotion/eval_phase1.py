@@ -46,6 +46,9 @@ from eval import load_policy  # go2-stairs
 
 REPO = Path(__file__).resolve().parents[2]
 FORCES = (0, 40, 80, 120, 160, 200, 240, 280, 320, 360, 400, 450, 500, 600)
+# Step heights for the gate-2 sweep. 0.12 is the plan's criterion and stays the headline;
+# the neighbours locate the clearance cliff (see gate()).
+STEP_SWEEP = (0.06, 0.08, 0.10, 0.11, 0.12, 0.13)
 PUSH_S, WARM_S, RECOVER_S = 0.1, 2.0, 3.0
 
 
@@ -72,6 +75,11 @@ def rollout(env, policy, n, steps, seed, command, stair=None, force=None, push_s
     base = env.mj_model.body("base").id
     alive = np.ones(n, bool)
     first_done = np.full(n, -1)
+    # A solver divergence is NOT the robot falling over: term_diverged fires on episodes that
+    # are still upright at a normal ride height (measured 2026-09-18, gate-2 trial 2 at
+    # up_z 0.999). Counting it as a fall scores a simulator artifact against the policy, so it
+    # is tracked separately and reported separately.
+    diverged = np.zeros(n, bool)
     x0 = np.array(st.pipeline_state.qpos[:, 0])
     max_s = np.array(st.info["max_s"])
     success = np.zeros(n, bool)
@@ -92,12 +100,14 @@ def rollout(env, policy, n, steps, seed, command, stair=None, force=None, push_s
         d = np.array(st.done) > 0
         newly = alive & d
         first_done[newly] = i
+        if "term_diverged" in st.metrics:
+            diverged |= newly & (np.array(st.metrics["term_diverged"]) > 0)
         alive &= ~d
         max_s = np.where(alive, np.array(st.metrics["max_s"]), max_s)
         success |= alive & (np.array(st.metrics["success"]) > 0)
     return dict(alive=alive, first_done=first_done, dx=np.array(st.pipeline_state.qpos[:, 0]) - x0,
                 max_s=max_s, success=success, vy_before=vy_before, vy_after=vy_after,
-                arm_q=np.array(st.pipeline_state.qpos[:, 19:26]))
+                arm_q=np.array(st.pipeline_state.qpos[:, 19:26]), diverged=diverged)
 
 
 def gate(base_cfg, ckpt, cfg, n=20, seed=100):
@@ -110,17 +120,35 @@ def gate(base_cfg, ckpt, cfg, n=20, seed=100):
     walked = (r["dx"] >= 5.0) & r["alive"]
     out["gate1_walk5m_stowed"] = dict(passed=int(walked.sum()), trials=n, mean_dx=float(r["dx"].mean()),
                                       PASS=bool(walked.sum() == n))
-    # 2. cross the 12 cm step with the arm extended.
+    # 2. cross the step with the arm extended -- swept over height, not a single pass/fail.
+    #
+    # WHY A SWEEP. The plan's criterion is one 12 cm step, and 12 cm is kept as the headline.
+    # But a single binary hides the only thing worth knowing: WHERE this embodiment stops
+    # clearing. Measured 2026-09-18, the Go2's front-lower trunk sphere sits 0.107 m below the
+    # base origin and 0.293 m forward, so at the ~13 deg nose-down pitch this gait takes while
+    # stepping up it rides at ~0.118 m -- clearing 0.11 m by 8 mm and striking 0.12 m. A curve
+    # shows that cliff; "FAIL" does not.
+    #
+    # Falls EXCLUDE solver divergences (see rollout): a diverged episode is a simulator
+    # artifact, not the robot falling, and is reported in its own column.
     env = make_env(base_cfg, flat_frac=0.0, randomize_arm=False, arm_fixed="extended",
                    dr_enable=True, cmd_stand_prob=0.0, cmd_resample_s=1e9)
     pol = load_policy(env, cfg, ckpt)
-    r = rollout(env, pol, n, steps=1000, seed=seed + 1, command=[0.5, 0.0, 0.0], stair=[0.12, 0.30, 0.0])
-    ext_err = float(np.abs(r["arm_q"][:, :6] - np.array(env._arm_extended)[:6]).max())
-    falls = int((~r["alive"]).sum())
-    crossed = int((r["success"]).sum())
-    out["gate2_step12cm_extended"] = dict(falls=falls, crossed=crossed, trials=n,
-                                          arm_extended_max_err_rad=ext_err,
-                                          PASS=bool(falls == 0 and crossed == n))
+    sweep = {}
+    for rise in STEP_SWEEP:
+        r = rollout(env, pol, n, steps=1000, seed=seed + 1, command=[0.5, 0.0, 0.0],
+                    stair=[rise, 0.30, 0.0])
+        div = int(r["diverged"].sum())
+        falls = int((~r["alive"]).sum()) - div
+        sweep[f"{rise:.3f}"] = dict(crossed=int(r["success"].sum()), falls=falls,
+                                    diverged=div, trials=n)
+        if abs(rise - 0.12) < 1e-9:
+            ext_err = float(np.abs(r["arm_q"][:, :6] - np.array(env._arm_extended)[:6]).max())
+            out["gate2_step12cm_extended"] = dict(
+                falls=falls, diverged=div, crossed=int(r["success"].sum()), trials=n,
+                arm_extended_max_err_rad=ext_err,
+                PASS=bool(falls == 0 and int(r["success"].sum()) == n))
+    out["gate2_height_sweep"] = sweep
     return out
 
 

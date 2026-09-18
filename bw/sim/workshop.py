@@ -99,8 +99,16 @@ def _tool_xml(t: ToolSpec, pos) -> str:
       <geom name="{t.name}_open" type="box" size="{head*0.7:.4f} {head} {ht}" pos="{hl+head*0.6:.4f} 0 0" material="chrome" mass="{m*0.2:.4f}" {common}/>
       <geom name="{t.name}_ring" type="cylinder" size="{head} {ht}" pos="{-hl-head*0.6:.4f} 0 0" material="chrome" mass="{m*0.2:.4f}" {common}/>"""
     elif t.name == "screwdriver":
+        # ROUND handle, not a box. MEASURED 2026-09-18: with a 25 mm SQUARE handle the tool
+        # had rolled a mean of 27.6 deg about its own long axis by the time the jaws closed
+        # (only +-8 deg at reset -- the earlier check measured the wrong instant), so the pads
+        # met a near-corner and the jaw gap sat at 34-44 mm on a 25 mm handle. A corner grip is
+        # a tiny contact patch, and the tool pivoted out of the jaws ~49 mm into the lift:
+        # screwdriver scored 0/8. It rolls freely because its shaft is a capsule. A cylinder
+        # presents 25 mm at EVERY roll angle -- and real screwdriver handles are round or hex
+        # for the same reason.
         geoms = f"""
-      <geom name="{t.name}_handle" type="box" size="0.035 0.0125 0.0125" pos="-0.045 0 0" rgba="0.95 0.78 0.05 1" mass="0.055" {common}/>
+      <geom name="{t.name}_handle" type="cylinder" size="0.0125 0.035" pos="-0.045 0 0" quat="0.7071 0 0.7071 0" rgba="0.95 0.78 0.05 1" mass="0.055" {common}/>
       <geom name="{t.name}_shaft" type="capsule" size="0.0035 0.045" pos="0.04 0 0" quat="0.7071 0 0.7071 0" material="chrome" mass="0.015" {common}/>"""
     elif t.name == "pliers":
         geoms = f"""
