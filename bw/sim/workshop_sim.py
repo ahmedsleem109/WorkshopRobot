@@ -199,7 +199,9 @@ class WorkshopSim:
         mujoco.mj_forward(m, d)
         self._hold_qpos = d.qpos[:19].copy()
         self.time = 0.0
-        self.settle(1.2)      # tools must be STATIC before a grasp is planned from their pose
+        # Tools must be STATIC before a grasp is planned from their pose -- to a measured
+        # velocity threshold, not a fixed wait (see settle_static).
+        self.settle_static()
         return tools_present
 
     # ------------------------------------------------------------------ physics
@@ -213,6 +215,25 @@ class WorkshopSim:
 
     def settle(self, seconds: float):
         self.physics_step(int(seconds / self.m.opt.timestep))
+
+    def settle_static(self, max_seconds: float = 4.0, tol: float = 0.002,
+                      chunk: float = 0.25) -> float:
+        """Settle until no tool is moving faster than `tol` m/s, or `max_seconds`.
+
+        A FIXED settle is not enough: measured 2026-09-18, one reset in ~25 still had a tool
+        sliding at 56 mm/s after the old fixed 1.2 s, and it then travelled another 49 mm --
+        so the grasp was planned from a pose the tool had already left. Returns the time spent,
+        which the caller can log; it is normally ~1.2 s and only occasionally longer.
+        """
+        t = 0.0
+        while t < max_seconds:
+            self.settle(chunk)
+            t += chunk
+            v = max(float(np.linalg.norm(self.d.qvel[self.tool_dadr[n]:self.tool_dadr[n] + 3]))
+                    for n in TOOL_NAMES)
+            if t >= 1.0 and v < tol:
+                break
+        return t
 
     def set_arm_target(self, q: np.ndarray):
         """q is the 7-vector command (6 joints + finger travel); both finger servos get it."""

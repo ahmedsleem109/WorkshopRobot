@@ -123,6 +123,11 @@ Failure stages: `dropped` 9, `no_lift` 8, `no_grip` 3 (see `STATUS.md` for defin
 **Acceptance:** `scripts/try_grasp.py 20` (100 episodes, fixed seeds) shows **≥90% per tool and
 ≥92% overall**, and the wrench_13mm drop seen in `media/grasp_wrench_13mm.mp4` is gone.
 
+**CLOSED 2026-09-18 (session 3): 97/100, per tool 96/100/96/96, on the held-for-2s criterion.**
+See STATUS.md for the mechanism (a pad-contact time constant of exactly 1 x the timestep) and
+for why every grasp number written before session 3 is not comparable. T1.2/T1.3/T1.5/T1.6
+were not needed to clear the bar and are left unticked on purpose.
+
 **UPDATED 2026-09-18.** The screwdriver is **dropped from the grasp set** (`GRASP_TOOLS` in
 `bw/sim/workshop.py`); it stays in the scene as a distractor for the grounding model. Current:
 **69%** over 4 tools - wrench_10mm 7/8, wrench_13mm 5/8, pliers 4/8, tape_roll 6/8, so the
@@ -132,7 +137,8 @@ there, not with a survey.
 
 Ordered sub-tasks — the first two are diagnosis, do not skip them:
 
-- [ ] **T1.1 Instrument the slip.** Log, per episode: contact normal force per pad, tool
+- [x] **T1.1 DONE 2026-09-18 (session 3).** `scripts/grasp_diagnose.py`. It found the creep
+      (STATUS.md), which was the whole of the `dropped` mode. Instrument the slip. Log, per episode: contact normal force per pad, tool
       pose in the *gripper frame* at close / after lift / after retreat, and the frame at which
       the tool's position in the gripper frame first moves >2 mm. That one number separates
       "never gripped", "slipped on lift", "extruded under squeeze" and "knocked during
@@ -148,7 +154,10 @@ Ordered sub-tasks — the first two are diagnosis, do not skip them:
       (b) the lift is not vertical in the tool's own frame when it leans — lift along the tool's
       long axis instead of world +z; (c) friction against the plates — reduce the slot gap for
       thin tools using per-slot gaps rather than one `RACK_GAP`.
-- [ ] **T1.4 Fix `dropped` (9/40), including wrench_13mm.** Hypotheses: (a) squeeze force too
+- [x] **T1.4 DONE 2026-09-18 (session 3)** -- but by NONE of the hypotheses below. `dropped`
+      was solver conditioning in the pad contacts, not squeeze force, contact softness,
+      retreat jerk or grasp height. wrench_13mm is 25/25. Original text kept for the record:
+      Fix `dropped` (9/40), including wrench_13mm. Hypotheses: (a) squeeze force too
       low for the heavier tools — scale `GRIP_OVERSHOOT` with tool mass, and verify the pad
       normal force from T1.1 is ≥15 N for 180 g pliers; (b) contact softness still allowing
       slow extrusion — tune `solimp` width, not stiffness; (c) the retreat's jerk — profile the
@@ -358,5 +367,7 @@ Keep 1, 2 and 4 if time is short (the plan's own cut line):
 | session 3 | success scored after a 2 s static hold, not at end of motion | 69% -> **31%** (the old number was an artifact) |
 | session 3 | CPU scene `timestep` 0.002 -> 0.001 and `cone` elliptic -> pyramidal (the pad-contact creep) | 10/32 -> 26/32 held-2s |
 | session 3 | tape roll grasped 45 deg up the rim instead of at the equator (below the plate tops) | tape_roll 2/8 -> 8/8 |
-| session 3 | **100-episode benchmark** | **92/100** (88/96/96/88 per tool) |
+| session 3 | staging waypoint above the pre-grasp (the scan->pre-grasp swing swept the rack) | 92/100 -> 97/100 |
+| session 3 | `settle_static` (velocity threshold) replaces the fixed 1.2 s settle | (same run) |
+| session 3 | **100-episode benchmark** | **97/100** (96/100/96/96 per tool) -- **T1 acceptance met** |
 | session 1 | grounding model: 4-bit pointing model (3.7 GB) chosen over Molmo2-ER (19.4 GB F32) | see T0 |

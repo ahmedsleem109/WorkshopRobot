@@ -33,6 +33,7 @@ TAPE_PHI = np.radians(45.0)   # tape roll: grasp this far ABOVE the ring's equat
                               # left half of the curve, the wall's apparent width across a
                               # laterally-closing jaw (7 mm / cos phi) costs the right half.
 LIFT = 0.18              # straight up, clearing the rack plates (base + RACK_H = 0.055)
+STAGE_UP = 0.12          # how far ABOVE the pre-grasp point the staging waypoint sits
 PITCH = (0.0, 0.15, -0.15, 0.3)
 SCAN_Q = np.array([0.0, 1.5, -2.1, 1.5, 0.0, 0.0, GRIPPER_OPEN])   # scripts/find_scan_pose.py
 CARRY_Q = np.array([0.0, 0.65, -1.05, 0.35, 0.0, 0.0, GRIPPER_CLOSED])
@@ -102,9 +103,16 @@ def plan_grasp(sim: WorkshopSim, ik: ArmIK, name: str, rng: np.random.Generator)
             ql, _, _, okl = ik.solve(sim.d, site + [0, 0, LIFT], Rg, q_init=qg)
             if not (okp and okl):
                 continue
+            # Staging pose: the pre-grasp point, raised. The arm reaches THIS first, so the
+            # long joint-space swing from the scan pose descends in front of the rack instead
+            # of sweeping through it. MEASURED: without it the gripper knocked a NEIGHBOURING
+            # tool into the target during `reach_pre` -- the target had already moved 50-68 mm
+            # before the jaws were anywhere near it (scripts/_knock_probe.py, seeds 17 and 21).
+            qs, _, _, oks = ik.solve(sim.d, site - PRE * a + [0, 0, STAGE_UP], Rg, q_init=qp)
             cost = np.abs(qp - q_now).sum() + 0.5 * abs(qg[5])
             if best is None or cost < best[0]:
-                best = (cost, dict(Rg=Rg, site=site, a=a, q_pre=qp, q_grasp=qg, q_lift=ql))
+                best = (cost, dict(Rg=Rg, site=site, a=a, q_pre=qp, q_grasp=qg, q_lift=ql,
+                                   q_stage=qs if oks else None))
         if best is not None:
             break
     return None if best is None else best[1]
@@ -144,8 +152,11 @@ def run_grasp(sim: WorkshopSim, ik: ArmIK, name: str, rng: np.random.Generator,
 
     ph("open")
     sim.move_arm(arm7(sim.arm_q()[:6], op), rng.uniform(0.3, 0.5), record)
+    if plan["q_stage"] is not None:
+        ph("stage")
+        sim.move_arm(arm7(plan["q_stage"], op), rng.uniform(1.4, 1.9), record)
     ph("reach_pre")
-    sim.move_arm(arm7(plan["q_pre"], op), rng.uniform(1.8, 2.6), record)
+    sim.move_arm(arm7(plan["q_pre"], op), rng.uniform(1.0, 1.4), record)
     # Re-point from close range before descending: tools settle in their slots for a second
     # or two after the scene is built, so a plan made at reset can be a centimetre stale.
     site = grasp_point(sim, name)

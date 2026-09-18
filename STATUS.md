@@ -112,15 +112,24 @@ criterion scored the tool while it was still sliding out of the jaws (see "the c
 
 | Tool | Success | Failure stages |
 |---|---|---|
-| wrench_10mm | 22/25 | no_lift 2, dropped 1 |
-| wrench_13mm | **24/25** | no_grip 1 |
+| wrench_10mm | **24/25** | no_grip 1 |
+| wrench_13mm | **25/25** | -- |
 | pliers | **24/25** | dropped 1 |
-| tape_roll | 22/25 | no_lift 2, no_grip 1 |
-| **overall** | **92/100** | no_lift 4, dropped 2, no_grip 2 |
+| tape_roll | **24/25** | dropped 1 |
+| **overall** | **97/100** | dropped 2, no_grip 1 |
 
 Against the same criterion the session-2 configuration scored **10/32 (31%)**, not the 69% in
-the old table. T1's acceptance is >=90% PER TOOL and >=92% overall: overall passes, the two
-88% tools do not, so T1 is not closed.
+the old table. T1's acceptance is >=90% PER TOOL and >=92% overall: **both pass, T1 is closed.**
+The three residual failures are one per mechanism and none is systematic.
+
+Four things got it there, in order of size:
+
+| fix | what it was | effect |
+|---|---|---|
+| timestep 0.001 + pyramidal cone | the pad-contact creep, below | 10/32 -> 26/32 held-2s |
+| `TAPE_PHI` 45 deg | tape grasped below the rack plate tops | tape_roll 2/8 -> 8/8 |
+| staging waypoint above the pre-grasp | the swing from the scan pose swept the rack and knocked a NEIGHBOURING tool into the target -- 50-68 mm before the jaws arrived (`scripts/_knock_probe.py`) | 92/100 -> 97/100 |
+| `settle_static` instead of a fixed 1.2 s | one reset in ~25 still had a tool sliding at 56 mm/s when the grasp was planned, and it moved another 49 mm | (same run) |
 
 ### THE CREEP -- why "dropped" was 8 of 10 failures (found 2026-09-18, session 3)
 
