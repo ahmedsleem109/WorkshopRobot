@@ -85,9 +85,13 @@ machine and calls the VLM only through `vlm.point()`.
 Both small candidates are **community mirrors** (single uploader, a few hundred downloads), so
 they are unverified — cheap to settle here, because sim hands us exact ground-truth poses.
 
-- [ ] **T0.1** Download `Cycl0/Molmo2-VideoPoint-4B-bnb-4bit` (3.7 GB) and the GGUF q4 pair
-      (3.6 GB) into `~/bringwrench/models/`. Keep the partial ER download on C: until a
-      candidate passes T0.3, then delete it.
+- [x] **T0.1 DONE 2026-09-18** - both downloaded, and both DEAD. See `STATUS.md` Known bug #6.
+      Molmo2 emits points as SPECIAL TOKENS (not text); the 4-bit mirror ships no pointing code
+      and will not load on transformers 5.5.4; the GGUF's grammar-constrained-text premise is
+      therefore void. **DECISION: Layer 1 is `Qwen/Qwen3-VL-2B-Instruct`** - 4.0 GB, official,
+      built into transformers (no trust_remote_code), TEXT coordinates, ~1.2 s per call.
+      The partial `allenai/Molmo2-ER` (15 of 19.4 GB) is still on C: if an OFFICIAL Molmo2 is
+      ever wanted; otherwise it can be deleted.
 - [ ] **T0.2** Confirm the pointing output format from `github.com/allenai/molmo2`
       (`MOLMO_POINT_README.md`): how points are encoded in the text, and the coordinate scale.
       The HF model card does not document it. Record it in `STATUS.md`.
@@ -118,6 +122,13 @@ Failure stages: `dropped` 9, `no_lift` 8, `no_grip` 3 (see `STATUS.md` for defin
 
 **Acceptance:** `scripts/try_grasp.py 20` (100 episodes, fixed seeds) shows **≥90% per tool and
 ≥92% overall**, and the wrench_13mm drop seen in `media/grasp_wrench_13mm.mp4` is gone.
+
+**UPDATED 2026-09-18.** The screwdriver is **dropped from the grasp set** (`GRASP_TOOLS` in
+`bw/sim/workshop.py`); it stays in the scene as a distractor for the grounding model. Current:
+**69%** over 4 tools - wrench_10mm 7/8, wrench_13mm 5/8, pliers 4/8, tape_roll 6/8, so the
+acceptance bar is now >=90% per tool over FOUR tools. **`dropped` is 8 of the 10 failures**, so
+there is ONE failure mode to attack: the tool leaves the jaws during the lift/retreat. Start
+there, not with a survey.
 
 Ordered sub-tasks — the first two are diagnosis, do not skip them:
 

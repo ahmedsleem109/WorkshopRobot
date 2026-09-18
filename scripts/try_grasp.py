@@ -17,7 +17,7 @@ import numpy as np
 
 from bw.manip.ik import ArmIK
 from bw.manip.scripted_grasp import SCAN_Q, run_grasp
-from bw.sim.workshop import TOOL_NAMES
+from bw.sim.workshop import GRASP_TOOLS, TOOL_NAMES
 from bw.sim.workshop_sim import WorkshopSim
 
 
@@ -36,11 +36,15 @@ def stage(r):
 def main(n=4, verbose=False):
     sim = WorkshopSim()
     ik = ArmIK(sim.m)
-    res = {t: [] for t in TOOL_NAMES}
+    res = {t: [] for t in GRASP_TOOLS}
     stages = Counter()
     t0 = time.time()
     for seed in range(n):
-        for ti, tool in enumerate(TOOL_NAMES):
+        # ti is the index in TOOL_NAMES, NOT in GRASP_TOOLS: the seed is 1000*seed + ti, so
+        # using the shorter list would reseed every tool and break comparison with every
+        # benchmark run before the screwdriver was dropped.
+        for tool in GRASP_TOOLS:
+            ti = TOOL_NAMES.index(tool)
             rng = np.random.default_rng(1000 * seed + ti)
             sim.reset(rng, target=tool, arm_q=SCAN_Q)
             r = run_grasp(sim, ik, tool, rng)
@@ -48,7 +52,7 @@ def main(n=4, verbose=False):
             stages[stage(r)] += 1
             if verbose:
                 print(seed, tool, r, flush=True)
-    print(f"{time.time() - t0:.0f}s, {n * len(TOOL_NAMES)} episodes")
+    print(f"{time.time() - t0:.0f}s, {n * len(GRASP_TOOLS)} episodes")
     for t, rs in res.items():
         st = Counter(stage(r) for r in rs)
         print(f"  {t:12s} {sum(r['success'] for r in rs)}/{len(rs)}   {dict(st)}")

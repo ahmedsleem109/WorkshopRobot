@@ -1,7 +1,42 @@
 # STATUS — "Bring me the 10mm wrench"
 
-Last updated **2026-09-17, end of session 1**. Read this, then `REMAINING.md` for what to do
+Last updated **2026-09-18, end of session 2**. Read this, then `REMAINING.md` for what to do
 next (tasks are ordered by dependency there, not by phase).
+
+---
+
+## START HERE — next session
+
+**Done this session:** T3 (payload fine-tune, 33M steps) and T4 (gate + ablation) are COMPLETE.
+T0 is all but settled. 2 of 13 tasks done, both locomotion.
+
+**Two decisions taken 2026-09-18, do not relitigate:**
+1. **Screwdriver dropped from the grasp set** (`GRASP_TOOLS` in `bw/sim/workshop.py`). It stays
+   in the scene as a distractor for the grounding model. Four hypotheses refuted, 0/8
+   throughout; the rack jam is the untested explanation and the fixture is a poor one.
+   Benchmark is now **69%** over 4 tools (was 57% over 5).
+2. **Qwen3-VL-2B is the Layer-1 grounding model** (`~/bringwrench/models/qwen3-vl-2b`, 4.0 GB).
+   Both Molmo2 mirrors are dead (Known bug #6). Qwen needs NO `trust_remote_code` — it is built
+   into transformers 5.5.4 — loads in bf16, and emits TEXT coordinates at ~1.2 s per call.
+
+**Next tasks, in order:**
+
+| # | task | why now |
+|---|---|---|
+| **T0.3 finish** | Confirm Qwen's coordinate SCALE and score accuracy vs sim ground truth | It replied `(800, 455)` and `(844, 500)` on a **512x512** image — that is Qwen's **0-1000 normalised** convention, NOT pixels. Convert `x_px = x/1000*W` and VERIFY. Also 1 of 5 replies refused ("There are none." for pliers) — check whether the tool was actually in the wrist view before blaming the model. `scripts/test_qwen_point.py` is the harness. |
+| **T1** | Grasp 69% -> >=90% per tool | **`dropped` is now 8 of 10 failures** (wrench_13mm 3, pliers 4, wrench_10mm 1). One failure mode, one place to look: the tool leaves the jaws during the lift/retreat. This is the critical path — it blocks T2 -> T6 -> T7 (the SmolVLA fine-tune, the centrepiece). |
+| **T5** | Validate `controller.py` against MJX | Small, self-contained, blocks T9, and independent of T1. Verify the observation bit-for-bit against `Go2ArmEnv._single_obs` — note the actor reads the **255-dim `privileged_state`** (see decision 6). |
+| **T8** | `locate()` behind `vlm.point()` | Unblocked as soon as T0.3 closes. |
+
+**Unfinished business worth knowing:**
+- `media/loco_payload.npz` was dumped but **never rendered** — run `scripts/render_traj.py` on
+  Windows for the money shot (the policy crossing the step with the arm extended).
+- The push-ablation anomaly (original stowed 160 N < extended 200 N) is REPRODUCIBLE and
+  unexplained. **Do not publish that table until it is.**
+- `QACC` NaN warnings still appear in CPU grasp runs and are independent of the jaw pads.
+- The GPU clock cap (`nvidia-smi -lgc 300,1100`, Administrator) does NOT survive a driver
+  re-init and lapsed mid-run once. `nvidia-smi -rgc` to release it. `ops/thermal_guard.sh`
+  stops training at 88 C as a backstop.
 
 Plan of record: `bring-me-the-10mm-wrench-plan (1).md`. Upstream locomotion project:
 `D:\hexapod` on Windows, `~/go2-stairs` in WSL (its `HANDOFF.md` and `plan.md` still apply to
@@ -11,10 +46,10 @@ everything about the locomotion policy).
 
 ## State in one line
 
-Phase 1's **embodiment, scene and simulation are built and stable**; the Phase 1 payload
-fine-tune has **not been launched** (its two blocking simulation bugs were found and fixed);
-Phase 2's scripted demonstrator **works but only at 50%**, which is not acceptable and is the
-first thing to fix next session; nothing of Phase 3 exists yet.
+Phase 1 is **measured and done** — the payload fine-tune trained (attitude terminations
+0.20 -> 0.05) and the gate/ablation ran, with gate 2 failing at 12 cm for a geometric reason
+that is understood and quantified; Phase 2's demonstrator is at **69% over 4 tools** and is now
+the project's critical path; Phase 3 does not exist yet.
 
 ---
 
