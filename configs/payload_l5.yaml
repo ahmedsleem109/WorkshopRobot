@@ -1,0 +1,123 @@
+# Targeted continuation of the 60M payload run, NOT a fresh fine-tune.
+#
+# WHY: gate 2 tests a 0.12 m rise / 0.30 m tread. The 60M run trained EXCLUSIVELY at
+# curriculum level 4 (0.110 m / 0.32 m) because promotion needs a success EMA > 0.65
+# (promote_success) and the run plateaued at 0.37-0.40 -- so it could never reach L5 and
+# never saw the step height the gate demands. Both genuine gate-2 falls were the TRUNK
+# striking the riser 8-11 cm before a step 1 cm taller than anything it trained on.
+#
+# level_init 5 (0.130 m) puts the gate geometry INSIDE the training distribution;
+# level_min 4 keeps 0.110 m in the mix so the easier step is not forgotten.
+# Warm start is the 60M run best checkpoint (step 33,013,760: reward 3196, succ 0.40).
+run_name: payload_l5
+env_class: stairs
+rest_every_s: 900
+rest_seconds: 120
+scene: unused-generated-by-env
+init_params: /home/sleem/bringwrench/runs/results/2026-09-18_02-47-57-payload/checkpoints/step_33013760
+network:
+  policy:
+  - 512
+  - 256
+  - 128
+  value:
+  - 512
+  - 256
+  - 128
+ppo:
+  num_timesteps: 10000000
+  num_envs: 4096
+  episode_length: 1000
+  unroll_length: 20
+  batch_size: 256
+  num_minibatches: 16
+  num_updates_per_batch: 4
+  learning_rate: 0.0002
+  max_grad_norm: 1.0
+  entropy_cost: 0.01
+  discounting: 0.97
+  gae_lambda: 0.95
+  clipping_epsilon: 0.2
+  reward_scaling: 0.1
+  normalize_observations: true
+  num_evals: 10
+  num_eval_envs: 128
+  log_training_metrics: true
+  seed: 0
+env:
+  n_frames: 10
+  action_scale: 0.5
+  episode_length: 1000
+  history_len: 5
+  n_steps: 1
+  run_max: 0.35
+  stair_width: 2.5
+  approach: 2.0
+  landing: 2.0
+  box_depth: 0.8
+  spawn_back: 2.0
+  cmd_vx:
+  - 0.0
+  - 0.9
+  cmd_vy:
+  - -0.2
+  - 0.2
+  cmd_wz:
+  - -0.6
+  - 0.6
+  level_init: 5
+  level_min: 4
+  promote_success: 0.65
+  demote_success: 0.25
+  success_ema_alpha: 0.05
+  flat_frac: 0.2
+  success_margin: 0.05
+  min_rel_height: 0.18
+  max_rel_height: 0.62
+  max_pitch: 0.6109
+  max_roll: 0.4363
+  back_margin: 100.0
+  w_progress: 2.0
+  progress_cap: 1.0
+  w_height_gain: 3.0
+  height_gain_cap: 0.5
+  w_clearance: 5.0
+  clearance_margin: 0.05
+  w_slip: 0.2
+  w_lin_vel: 3.0
+  w_ang_vel: 0.8
+  w_air_time: 1.0
+  air_time_threshold: 0.15
+  tracking_sigma: 0.25
+  w_torque: 0.0001
+  w_action_rate: 0.02
+  w_joint_vel: 0.0005
+  w_joint_acc: 5.0e-07
+  w_ang_damp: 0.05
+  w_joint_limit: 10.0
+  w_collision: 1.0
+  w_termination: 1.0
+  target_height: 0.28
+  w_orientation: 0.5
+  w_base_height: 0.5
+  dr_enable: true
+  latency_max: 1.0
+  noise_proj_grav: 0.05
+  noise_gyro: 0.2
+  noise_accel: 0.5
+  noise_joint_pos: 0.01
+  noise_joint_vel: 1.5
+  push_interval:
+  - 8.0
+  - 15.0
+  push_vel: 0.5
+  asymmetric: true
+  actor_privileged: true
+  arm_p_stowed: 0.35
+  arm_p_extended: 0.25
+  arm_speed: 1.2
+  w_arm_stab: 0.3
+  cross_margin: 0.4
+  cmd_stand_prob: 0.2
+  cmd_resample_s: 5.0
+  progress_min_vx: 0.2

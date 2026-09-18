@@ -206,6 +206,64 @@ Link speed measured at **~280 KB/s** — budget downloads in hours, not minutes.
 
 ---
 
+## Phase 1 gate + ablation — RUN 2026-09-18, gate 2 FAILS
+
+Policy: `runs/results/2026-09-18_02-47-57-payload/checkpoints/step_33013760` (the 60M run was
+stopped at 33M; reward had plateaued ~3,050-3,200 since step 20M). Results in
+`runs/results/phase1/` (`phase1_eval.json`, `push_ablation.md`). The script ran clean on first
+execution — the "expect API friction" warning was wrong.
+
+| gate criterion | original (run 7) | payload-aware | |
+|---|---|---|---|
+| 1. walk 5 m flat, arm stowed, 20/20 | 20/20 | 20/20 | PASS (both — does NOT discriminate) |
+| 2. cross 12 cm step, arm extended, **0 falls**/20 | 1 crossed, 19 falls | **17 crossed, 3 falls** | **FAIL** |
+
+| max recoverable push | arm stowed | arm extended |
+|---|---|---|
+| original (run 7) | 160 N | 200 N |
+| payload-aware | **280 N** | **280 N** |
+
+**Best result of the project so far:** the payload policy is **invariant to arm configuration**
+(280 N either way) while the original swings with it — exactly what Phase 1 set out to prove.
+Step-crossing went 1/20 -> 17/20. Training: attitude terminations 0.20 -> 0.05 over 33M steps.
+
+**CAVEAT on the ablation:** original stowed 160 N < original extended 200 N is BACKWARDS and
+unexplained. One grid step (sweep is 0/40/.../200/240) at 40 trials per force, so probably
+noise — but it is in the headline table and a reviewer will ask. Re-run that row on a finer
+grid before publishing.
+
+### The 3 gate-2 falls, diagnosed (`scripts/_diag_gate2.py` replays gate 2 per-trial)
+
+| trial | step | dx at end | base z | up_z | cause |
+|---|---|---|---|---|---|
+| 4 | 167 | **1.923** | 0.290 | 0.975 | `term_contact` |
+| 14 | 164 | **1.891** | 0.288 | 0.976 | `term_contact` |
+| 2 | 391 | 4.177 | 0.378 | **0.999** | `term_diverged` |
+
+Trials 4 and 14 are the SAME failure: same place (3 cm apart), same moment, same cause, same
+posture. The robot spawns at x=0 and the riser is at x=`approach`=2.0, so they strike the step
+face 8-11 cm before it. `fatal_contact` is TRUNK contact only (calf contact is deliberately not
+fatal), so these are genuine falls — the torso hits the riser.
+
+Trial 2 is NOT a locomotion failure: `term_diverged` at up_z 0.999 (perfectly upright) and a
+normal height for the raised platform. Residual MJX instability, the class the solver fix
+reduced but did not eliminate. Do not count it against the policy.
+
+### TRAP — the curriculum could never reach the terrain the gate tests
+
+`~/go2-stairs/terrain/stairs.py` LEVELS: **L4 = (0.110 m rise, 0.32 m run)**, L5 = (0.130, 0.30).
+Gate 2 tests **(0.12, 0.30)** — taller rise AND shorter tread than L4. The 60M run trained
+EXCLUSIVELY at L4 (`lvl` read exactly 4.00 in all 13 evals) because promotion needs a success
+EMA > `promote_success: 0.65` and the run plateaued at **0.37-0.40**. It was therefore
+STRUCTURALLY INCAPABLE of ever training on a 0.12 m step — at 60M steps or 600M. **More
+training would not have fixed gate 2.** Check the `lvl` column against the eval geometry before
+spending GPU-hours on any curriculum run.
+
+Fix in flight: `configs/payload_l5.yaml` — `level_init: 5`, `level_min: 4`, warm-started from
+step_33013760, 10M steps (~1.5-3 h), so the gate geometry is inside the training distribution.
+
+---
+
 ## Known bugs and open questions
 
 1. **wrench_13mm drops after the pick** (visible in `media/grasp_wrench_13mm.mp4`): lifts
