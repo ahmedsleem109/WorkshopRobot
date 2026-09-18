@@ -33,7 +33,9 @@ T0 is all but settled. 2 of 13 tasks done, both locomotion.
   Windows for the money shot (the policy crossing the step with the arm extended).
 - The push-ablation anomaly (original stowed 160 N < extended 200 N) is REPRODUCIBLE and
   unexplained. **Do not publish that table until it is.**
-- `QACC` NaN warnings still appear in CPU grasp runs and are independent of the jaw pads.
+- `QACC` NaN warnings still appear in CPU grasp runs. They are NOT independent of the jaw
+  pads after all: raising `impratio` to 50-100 makes them much more frequent, and that is the
+  same conditioning problem as the creep. Worth re-checking now that the timestep is halved.
 - The GPU clock cap (`nvidia-smi -lgc 300,1100`, Administrator) does NOT survive a driver
   re-init and lapsed mid-run once. `nvidia-smi -rgc` to release it. `ops/thermal_guard.sh`
   stops training at 88 C as a backstop.
@@ -70,6 +72,7 @@ the project's critical path; Phase 3 does not exist yet.
 | Layer 3 interface (`set_velocity` / `get_base_pose` / `is_stable`) | `bw/locomotion/controller.py` | written, **not validated against MJX** |
 | Trajectory dump (WSL) + render (Windows) | `bw/locomotion/dump_traj.py`, `scripts/render_traj.py` | works |
 | Grasp benchmark with failure-stage breakdown | `scripts/try_grasp.py` | works |
+| Slip/force instrumentation (T1.1), per-sample CSV | `scripts/grasp_diagnose.py` | works; found the creep |
 
 Generated models (all from `python -m bw.sim.build_models`):
 `models/go2z1_mjx.xml` (MJX training), `models/go2z1.xml` (CPU), `models/workshop.xml`,
@@ -100,19 +103,61 @@ lifts then drops), `media/loco_run7_arm.mp4` (run-7 policy carrying the arm, pre
 - Reach: all 5 rack slots reachable horizontally from base x ∈ [4.00, 4.12].
 - Passive stand holds: base z 0.22–0.24, up·z ≥ 0.987 after 3 s, arm stowed and extended.
 
-### Scripted grasp demonstrator — 40-episode benchmark, seeds 0–7 (`scripts/try_grasp.py 8`)
+### Scripted grasp demonstrator -- 100-episode benchmark, seeds 0-24 (`scripts/try_grasp.py 25`)
+
+**SUCCESS IS NOW SCORED AFTER A 2-SECOND STATIC HOLD** (`HOLD_VERIFY` in `scripted_grasp.py`),
+not at the instant the retreat ends. Every number below and in the change log is on that
+criterion; numbers from before 2026-09-18 session 3 are NOT comparable, because the old
+criterion scored the tool while it was still sliding out of the jaws (see "the creep" below).
 
 | Tool | Success | Failure stages |
 |---|---|---|
-| wrench_10mm | **8/8** | — |
-| wrench_13mm | 6/8 | dropped 2 |
-| tape_roll | 3/8 | dropped 3, no_lift 2 |
-| pliers | 3/8 | dropped 3, no_lift 2 |
-| screwdriver | **0/8** | no_grip 3, no_lift 4, dropped 1 |
-| **overall** | **50%** | dropped 9, no_lift 8, no_grip 3 |
+| wrench_10mm | 22/25 | no_lift 2, dropped 1 |
+| wrench_13mm | **24/25** | no_grip 1 |
+| pliers | **24/25** | dropped 1 |
+| tape_roll | 22/25 | no_lift 2, no_grip 1 |
+| **overall** | **92/100** | no_lift 4, dropped 2, no_grip 2 |
 
-Stage meanings: `ik` no reachable plan · `no_grip` pads never closed on the tool ·
-`no_lift` gripped but never left the rack · `dropped` lifted, then lost during the retreat.
+Against the same criterion the session-2 configuration scored **10/32 (31%)**, not the 69% in
+the old table. T1's acceptance is >=90% PER TOOL and >=92% overall: overall passes, the two
+88% tools do not, so T1 is not closed.
+
+### THE CREEP -- why "dropped" was 8 of 10 failures (found 2026-09-18, session 3)
+
+The jaw pads carry `solref` timeconst **0.002 s** while the CPU scene ran at MuJoCo's default
+**0.002 s** timestep. MuJoCo requires a contact time constant of **at least 2 x timestep**; at
+exactly 1x the contact is ill-conditioned, and the symptom is not a visible blow-up but a
+silent one: **a gripped tool slides out of the jaws under its own weight at ~280 mm/s** with
+25 N on each pad and pad friction 2.0 -- about 50 N of Coulomb capacity against a 0.45 N
+wrench. `scripts/grasp_diagnose.py` shows the tool creeping at a constant ~12 mm/s in the
+GRIPPER FRAME even while the arm is completely stationary, which no Coulomb contact can do.
+
+`scripts/_creep_probe.py` isolates it by holding a grasped tool still for 3 s:
+
+| variant | creep | reading |
+|---|---|---|
+| base | **282 mm/s** (tool on the floor in 3 s) | -- |
+| gravity off | 0.00 mm/s | the creep is load-driven: a genuine friction failure |
+| pad friction x10 | 48 mm/s | scales with mu -> cone slip, not geometry |
+| **timestep halved** | **7.8 mm/s** | 36x better: conditioning, exactly as predicted |
+| pyramidal cone | 13.5 mm/s | 21x better |
+| pad solref 0.02 (softer) | grasp fails outright | do not soften the pads instead |
+
+Fix, now the default in `bw/sim/workshop.py`: **`timestep="0.001"` and `cone="pyramidal"`**.
+Held-2s over the four tools, 32 episodes: **10/32 -> 26/32**. Both are needed (timestep alone
+9/16, pyramidal alone 5/16). **Raising `impratio`, the usual internet advice for this symptom,
+makes it strictly worse** -- 0/16 at 50 and at 100, and it brings back the QACC warnings.
+The MJX locomotion model is untouched, so no Phase 1 number is affected.
+
+### Tape roll: the grasp point was below the rack plates
+
+The ring was grasped at its equator, which is the ring's own centre -- 45 mm above the rack
+floor, **5 mm BELOW the 50 mm plate tops**. The jaws reached the rack before the tape:
+`site_err` 8-19 mm against ~1 mm for every other tool. Grasping `TAPE_PHI` up the rim instead
+(`scripts/_tape_sweep.py`, 8 seeds, held-2s): 0 deg **2/8**, 15 deg 6/8, 30 deg 7/8,
+**45 deg 8/8** (site_err 1.2 mm), 60 deg 5/8, 70 deg 1/8. Clearance above the plates buys the
+left half of the curve; the wall's apparent width across a laterally-closing jaw (7 mm/cos phi)
+costs the right half. `TAPE_PHI = 45 deg`.
 
 ### Locomotion, before any fine-tuning
 
@@ -356,7 +401,10 @@ step_33013760, 10M steps (~1.5-3 h), so the gate geometry is inside the training
    One seed DOES lift it 160 mm clear before losing it on the retreat, so extraction is
    possible and the grasp is simply not repeatable. Next candidates: rack/slot geometry for
    this tool, or the shaft's 45 mm of engagement between the plates.
-3. **pliers / tape_roll ~3/8**, both mostly `dropped`.
+3. **pliers / tape_roll -- FIXED 2026-09-18 (session 3).** pliers 24/25 (the creep); tape_roll
+ 22/25 (the creep, plus a grasp point 5 mm below the rack plate tops). The 8 residual
+ failures over 100 episodes are scattered across `no_lift` 4, `dropped` 2, `no_grip` 2 with
+ no dominant mechanism -- that is what the remaining T1 work has to attack.
 4. `controller.py` (numpy Layer 3) has never been run against the MJX env — the observation
    must be verified bit-for-bit against `Go2ArmEnv._single_obs` before trusting it.
 5. `eval_phase1.py` has never been executed; expect API friction on first run.

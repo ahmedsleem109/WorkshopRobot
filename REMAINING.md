@@ -355,4 +355,8 @@ Keep 1, 2 and 4 if time is short (the plan's own cut line):
 | session 1 | retreat 0.22 → 0.13 m, squeeze 12 → 8 mm past contact | 47% → 48% |
 | session 1 | rack slot gap 24 → 30 mm (screwdriver handle never seated) | 48% → **50%** |
 | session 1 | re-point at pre-grasp + 1.2 s settle | **not yet benchmarked (T1.2)** |
+| session 3 | success scored after a 2 s static hold, not at end of motion | 69% -> **31%** (the old number was an artifact) |
+| session 3 | CPU scene `timestep` 0.002 -> 0.001 and `cone` elliptic -> pyramidal (the pad-contact creep) | 10/32 -> 26/32 held-2s |
+| session 3 | tape roll grasped 45 deg up the rim instead of at the equator (below the plate tops) | tape_roll 2/8 -> 8/8 |
+| session 3 | **100-episode benchmark** | **92/100** (88/96/96/88 per tool) |
 | session 1 | grounding model: 4-bit pointing model (3.7 GB) chosen over Molmo2-ER (19.4 GB F32) | see T0 |

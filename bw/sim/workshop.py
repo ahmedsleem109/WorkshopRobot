@@ -215,8 +215,22 @@ def build_workshop_xml(robot_file: str = "go2z1_scene_robot.xml") -> str:
   <include file="{robot_file}"/>
 
   <!-- CPU scene: the Go2 MJX model's iterations=1 / impratio=100 solver is tuned for batched
-       locomotion throughput and is unstable for light free objects in a gripper. -->
-  <option iterations="50" ls_iterations="20" impratio="10" cone="elliptic" noslip_iterations="0"/>
+       locomotion throughput and is unstable for light free objects in a gripper.
+
+       timestep 0.001 and a PYRAMIDAL cone, both MEASURED 2026-09-18 (scripts/_creep_probe.py,
+       scripts/_pad_fix_sweep.py), are what make a grasp actually hold. The jaw pads carry
+       solref timeconst 0.002 (build_models.py PAD_SOLREF); MuJoCo needs a contact time
+       constant >= 2 x timestep, and at the default 0.002 timestep it sat at exactly 1 x.
+       The consequence was not a visible instability but a silent one: a gripped tool slid
+       out of the jaws under its own weight at ~280 mm/s with 25 N on each pad and mu = 2.0,
+       i.e. ~50 N of Coulomb capacity against a 0.45 N tool. Held-for-2s success over the
+       four grasp tools, 32 episodes: 10/32 before, 26/32 after. Halving the timestep alone
+       gives 9/16 and the pyramidal cone alone 5/16 -- both are needed. Raising impratio,
+       the usual advice for this symptom, makes it strictly worse (0/16 at 50 or 100) and
+       brings back the QACC warnings. Do not soften the pads instead: solref 0.006 scores
+       2/16 because the pads then sink into the handle. -->
+  <option timestep="0.001" iterations="50" ls_iterations="20" impratio="10" cone="pyramidal"
+          noslip_iterations="0"/>
 
   <statistic center="2.2 0 0.4" extent="4.0"/>
   <visual>
