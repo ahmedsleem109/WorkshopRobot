@@ -30,7 +30,12 @@ TOL_POS, TOL_YAW = 0.03, np.radians(3.0)
 # a few degrees / centimetres short of every goal -- the first walk timed out 4.2 deg from a
 # 4 deg tolerance. So the navigator only ever asks for motion it will get: turns at >= W_MIN,
 # the final creep at a steady V_CREEP, and it stops on the mark instead of slowing into it.
-W_MIN, V_CREEP = 0.45, 0.25
+W_MIN, V_CREEP = 0.45, 0.30
+STALL_S, KICK_V, COAST = 0.6, 0.45, 0.04
+V_BACK, TOL_FINE, COAST_FINE = -0.25, 0.03, 0.03
+# Yaw is only trimmed when it is really off: a few-degree in-place turn slides the base ~10 cm
+# sideways, and the place skill plans with IK from the live base pose anyway.
+TOL_FINE_YAW, FINE_ROUNDS = np.radians(8.0), 6
 V_SIDE = 0.2             # m/s sidestep command (achieves ~0.10-0.14)
 FAR_EXTRA = 0.50         # m: the big-turn waypoint is this much further back than `pre`
 
@@ -145,21 +150,75 @@ def walk_to(sim, station, backup: float = BACKUP, on_phase=None, timeout_s: floa
         # SIDESTEP instead, now that run 3 has one (+0.14 / -0.10 m/s at 1.8M steps): the
         # arrival at `pre` can be up to ~20 cm off the line, and the first straight-only creep
         # left 17-40 cm of it at the station.
+        # STALL KICK. Mid-creep, carrying the arm, the final run-3 policy was measured slowing
+        # into its stand state and NOT restarting at 0.25 m/s (standing still 0.39 m short
+        # for 6 s, no contact anywhere); from a fresh stand it walks at 0.25 fine. So: if the
+        # base has been still for STALL_S while told to move, command KICK_V briefly.
+        stall = {"t": 0.0, "kick": 0}
+
         def creep_cmd():
             _, lat, _ = errs()
-            return (V_CREEP, float(np.clip(2.0 * lat, -V_SIDE, V_SIDE)), 0.0)
+            vy = float(np.clip(2.0 * lat, -V_SIDE, V_SIDE))
+            speed = float(np.linalg.norm(sim.d.qvel[:2]))
+            stall["t"] = stall["t"] + loco.dt if speed < 0.03 else 0.0
+            if stall["t"] > STALL_S:
+                stall["kick"], stall["t"] = int(0.3 / loco.dt), 0.0
+            if stall["kick"] > 0:
+                stall["kick"] -= 1
+                return (KICK_V, vy, 0.0)
+            return (V_CREEP, vy, 0.0)
 
+        # Stop COAST early: the base keeps going ~2-5 cm after the command drops to zero.
         ok = ok and run("approach", creep_cmd,
-                        lambda: errs()[0] < 0.02 or abs(errs()[1]) > 0.30, 8.0)
-        ok = ok and run("side_trim",
-                        lambda: (0.0, float(np.sign(errs()[1]) * V_SIDE), 0.0),
-                        lambda: abs(errs()[1]) < 0.025, 6.0)
-        ok = ok and run("settle_yaw", lambda: turn_cmd(lambda: yaws),
-                        lambda: abs(_wrap(yaws - pose()[1])) < np.radians(5), 6.0)
+                        lambda: errs()[0] < COAST or abs(errs()[1]) > 0.30, 8.0)
+        def still():
+            return np.linalg.norm(sim.d.qvel[:2]) < 0.03 and abs(sim.d.qvel[5]) < 0.05
 
-        # --- stop: zero command until the base has stopped moving
-        run("stop", lambda: (0.0, 0.0, 0.0),
-            lambda: np.linalg.norm(sim.d.qvel[:2]) < 0.03 and abs(sim.d.qvel[5]) < 0.05, 3.0)
+        # --- FINE ALIGNMENT: stop, measure, fix the worst error with one short burst, repeat.
+        # Corrections interfere: a yaw trim followed by a stop coasted the final run-3 policy
+        # 11 cm sideways and 10 deg back (table B, 5/5 episodes). So each burst is followed by
+        # a full stop and a fresh measurement, and only then the next correction is chosen.
+        run("stop", lambda: (0.0, 0.0, 0.0), still, 3.0)
+        def burst(name, base_cmd, done):
+            # Same stall kick as the creep: from a standstill, back-up and the right sidestep
+            # often do not start (measured: table A overshoots were left 8-11 cm past the mark
+            # because -0.25 m/s never got the gait going). Boost x1.6 for 0.3 s after 0.6 s still.
+            st = {"t": 0.0, "kick": 0}
+            base_cmd = np.array(base_cmd, float)
+
+            def cmd():
+                moving = np.linalg.norm(sim.d.qvel[:2]) > 0.03 or abs(sim.d.qvel[5]) > 0.1
+                st["t"] = 0.0 if moving else st["t"] + loco.dt
+                if st["t"] > STALL_S:
+                    st["kick"], st["t"] = int(0.3 / loco.dt), 0.0
+                if st["kick"] > 0:
+                    st["kick"] -= 1
+                    return tuple(1.6 * base_cmd)
+                return tuple(base_cmd)
+            return run(name, cmd, done, 4.0)
+
+        # Yaw FIRST (at most twice), then only lateral / along -- never yaw again: at table A an
+        # in-place yaw trim also pushed the base 5-8 cm FORWARD toward the bench, so a loop that
+        # alternated yaw and back-up oscillated and ended 9-14 cm past the mark.
+        for k in range(2):
+            eyaw = errs()[2]
+            if abs(eyaw) <= TOL_FINE_YAW:
+                break
+            sg = np.sign(eyaw)
+            burst(f"fine_yaw{k}", (0.0, 0.0, sg * W_MIN), lambda: sg * errs()[2] < np.radians(1.5))
+            run(f"stop_yaw{k}", lambda: (0.0, 0.0, 0.0), still, 3.0)
+        for k in range(FINE_ROUNDS):
+            along, lat, _ = errs()
+            if abs(lat) > TOL_FINE:
+                sg = np.sign(lat)
+                burst(f"fine{k}_side", (0.0, sg * V_SIDE, 0.0), lambda: sg * errs()[1] < 0.01)
+            elif abs(along) > TOL_FINE:
+                sg = np.sign(along)
+                burst(f"fine{k}_along", (V_CREEP if sg > 0 else V_BACK, 0.0, 0.0),
+                      lambda: sg * errs()[0] < COAST_FINE)
+            else:
+                break
+            run(f"stop{k}", lambda: (0.0, 0.0, 0.0), still, 3.0)
         fell = False
     except RuntimeError:
         ok, fell = False, True
@@ -167,6 +226,9 @@ def walk_to(sim, station, backup: float = BACKUP, on_phase=None, timeout_s: floa
     xy, yaw = pose()
     err_xy = float(np.linalg.norm(xy - np.array([xs, ys])))
     err_yaw = float(np.degrees(abs(_wrap(yaws - yaw))))
+    d_end = np.array([xs, ys]) - xy
     return {"success": bool(ok and not fell), "fell": fell,
+            "along_mm": round(1000 * float(d_end @ h), 1),
+            "lateral_mm": round(1000 * float(d_end @ np.array([-h[1], h[0]])), 1),
             "err_xy_mm": round(1000 * err_xy, 1), "err_yaw_deg": round(err_yaw, 1),
             "time_s": round(sim.time - t_start, 1), "phases": log}
