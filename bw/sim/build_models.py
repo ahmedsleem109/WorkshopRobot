@@ -44,6 +44,13 @@ ARM_MOUNT = (0.06, 0.0, 0.057 + PEDESTAL_H)
 # CoM within ~4 cm of the mount; EXTENDED reaches ~0.55 m forward at trunk height.
 # Gripper command is now the finger travel of a PARALLEL jaw: 0 = closed, FINGER_TRAVEL = open.
 FINGER_TRAVEL = 0.038
+# Finger servo stiffness, N/m; the squeeze is GRIP_KP x how far the command overshoots
+# contact. 1200 gave ~20 N per pad and the 13 mm wrench still crept through the jaws at a
+# median 55 mm/s (one in four slid out entirely) with the arm held perfectly still. 4000
+# gives ~60 N -- ordinary for an off-the-shelf parallel gripper -- and 3.4 mm/s (max 7);
+# tape roll 1.6 -> 0.5 mm/s; every grasp still closes (scripts/_grip_force_probe.py,
+# 2026-09-19). The pliers' ~8 mm/s does not respond to force at all: a separate mechanism.
+GRIP_KP = 4000.0
 GRIP_OVERSHOOT = 0.008
 # Jaw-pad contact time constant, = 1*model timestep (workshop.xml runs the MuJoCo default
 # dt=0.002). MEASURED 2026-09-18: raising this to 0.004 (the usual ">= 2*dt" guidance) did NOT
@@ -144,8 +151,8 @@ def _base_spec() -> mujoco.MjSpec:
         go2.add_actuator(name=f"arm_motorGripper_{tag}", target=f"arm_finger_{tag}",
                          trntype=mujoco.mjtTrn.mjTRN_JOINT,
                          gaintype=mujoco.mjtGain.mjGAIN_FIXED,
-                         biastype=mujoco.mjtBias.mjBIAS_AFFINE, gainprm=[1200] + [0] * 9,
-                         biasprm=[0, -1200, -25] + [0] * 7, forcerange=[-150, 150],
+                         biastype=mujoco.mjtBias.mjBIAS_AFFINE, gainprm=[GRIP_KP] + [0] * 9,
+                         biasprm=[0, -GRIP_KP, -25] + [0] * 7, forcerange=[-150, 150],
                          # The command may go 15 mm PAST contact, as a real gripper's
                          # position/force command does: the servo then squeezes at
                          # kp * overshoot (~27 N) instead of the ~9 N it produces when the

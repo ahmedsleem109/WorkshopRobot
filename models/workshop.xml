@@ -62,11 +62,14 @@
     <geom name="wall_right" type="box" size="4 0.05 1.2" pos="1.7 -3.0 1.2" material="wall" contype="7" conaffinity="7"/>
 
     <!-- 12 cm raised walkway: the one step -->
-    <geom name="walkway" type="box" size="1.550 1.600 0.060"
-      pos="2.850 0.000 0.060" material="walkway" condim="3"
+    <geom name="walkway" type="box" size="1.575 1.600 0.060"
+      pos="2.875 0.000 0.060" material="walkway" condim="3"
       friction="0.8 0.02 0.01" contype="7" conaffinity="7"/>
     <geom name="walkway_edge" type="box" size="0.02 1.600 0.0605"
       pos="1.320 0.000 0.060" material="hazard" contype="0" conaffinity="0"/>
+    <geom name="walkway_spur_b" type="box" size="0.450 0.200 0.060"
+      pos="2.700 -1.750 0.060" material="walkway" condim="3"
+      friction="0.8 0.02 0.01" contype="7" conaffinity="7"/>
 
     <!-- bench -->
     <body name="bench" pos="4.750 0.000 0">

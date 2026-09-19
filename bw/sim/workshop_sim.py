@@ -94,6 +94,22 @@ class WorkshopSim:
         self._hold_qpos = None
         self.arm_target = np.zeros(N_ARM)
         self.time = 0.0
+        self.loco = None                 # Layer 3, attached by attach_locomotion()
+        self._loco_k = 0
+
+    # ------------------------------------------------------------------ Layer 3
+    def attach_locomotion(self, policy_npz: str | Path = ROOT / "models/payload_nav_policy.npz"):
+        """Hand the legs to the walking policy for the rest of this sim's life.
+
+        From here on EVERY physics step -- grasp, walk, place -- runs the policy at 50 Hz, so
+        the robot stands on its own legs while the arm works instead of being pinned. The
+        walk between stations is then real walking (walk_to), not teleport_base.
+        """
+        from bw.locomotion.controller import Locomotion
+        self.base_mode = "policy"
+        self.loco = Locomotion(self.m, self.d, policy_npz)
+        self._loco_k = 0
+        return self.loco
 
     def _standing_offsets(self) -> dict[str, float]:
         """How high each tool's frame origin must sit above the rack floor when standing.
@@ -200,6 +216,9 @@ class WorkshopSim:
         mujoco.mj_forward(m, d)
         self._hold_qpos = d.qpos[:19].copy()
         self.time = 0.0
+        if self.loco is not None:
+            self.loco.reset()                 # fresh observation history for the new state
+            self._loco_k = 0
         # Tools must be STATIC before a grasp is planned from their pose -- to a measured
         # velocity threshold, not a fixed wait (see settle_static).
         self.settle_static()
@@ -207,11 +226,19 @@ class WorkshopSim:
 
     # ------------------------------------------------------------------ physics
     def physics_step(self, n: int = 1):
+        loco = self.loco if self.base_mode == "policy" else None
         for _ in range(n):
             if self.base_mode == "kinematic":
                 self.d.qpos[:19] = self._hold_qpos
                 self.d.qvel[:18] = 0
+            if loco is not None and self._loco_k == 0:
+                loco.pre_physics()                 # 50 Hz: policy -> leg targets
             mujoco.mj_step(self.m, self.d)
+            if loco is not None:
+                self._loco_k += 1
+                if self._loco_k == loco.n_substeps:
+                    self._loco_k = 0
+                    loco.after_physics()
         self.time += n * self.m.opt.timestep
 
     def settle(self, seconds: float):

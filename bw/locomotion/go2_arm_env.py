@@ -92,6 +92,22 @@ class ArmStairsConfig(StairsConfig):
     cmd_resample_s: float = 5.0     # mean seconds between resamples
     progress_min_vx: float = 0.2    # progress/height/clearance rewards only when walking
 
+    # --- navigation command modes (configs/payload_nav.yaml) ---
+    # MEASURED 2026-09-19 on the 33M payload checkpoint, CPU and MJX agree: a pure turn
+    # (0, 0, 0.5) gives 0.7 deg in 3 s, a sidestep 0 m, anything under vx 0.2 m/s STANDS, and
+    # (0.2, 0, -0.6) stands too. The reward explains it: air time only paid when |v_xy| > 0.1,
+    # progress/height only when vx > 0.2, vx sampled from [0, 0.9]. A robot that must turn
+    # around 10 cm from a bench cannot navigate with that. These modes put turn-in-place,
+    # backing up and sidestepping into the command distribution at magnitudes the tracking
+    # reward can tell apart from standing. All probabilities 0 = the old sampler, unchanged.
+    cmd_p_turn: float = 0.0         # vx = vy = 0, |wz| in cmd_turn_abs
+    cmd_p_back: float = 0.0         # vx in cmd_back_vx, small wz
+    cmd_p_lateral: float = 0.0      # vy only, |vy| in cmd_lat_abs
+    cmd_turn_abs: Tuple[float, float] = (0.4, 1.0)
+    cmd_back_vx: Tuple[float, float] = (-0.4, -0.15)
+    cmd_lat_abs: Tuple[float, float] = (0.15, 0.3)
+    turn_is_moving: bool = False    # pay the gait (air-time) reward for yaw commands too
+
 
 class Go2ArmEnv(Go2StairsEnv):
     def __init__(self, scene_path: str | None = None, config: ArmStairsConfig | None = None,
@@ -161,9 +177,21 @@ class Go2ArmEnv(Go2StairsEnv):
 
     # ------------------------------------------------------------------ commands
     def _sample_command(self, rng):
-        k_cmd, k_stand = jax.random.split(rng)
+        c = self.cfg
+        k_cmd, k_stand, k_mode, k_mag, k_sign, k_w = jax.random.split(rng, 6)
         cmd = super()._sample_command(k_cmd)
-        stand = jax.random.uniform(k_stand, ()) < self.cfg.cmd_stand_prob
+        sign = jp.where(jax.random.uniform(k_sign, ()) < 0.5, -1.0, 1.0)
+        u = jax.random.uniform(k_mag, ())
+        turn = jp.array([0.0, 0.0, sign * (c.cmd_turn_abs[0] + u * (c.cmd_turn_abs[1] - c.cmd_turn_abs[0]))])
+        back = jp.array([c.cmd_back_vx[0] + u * (c.cmd_back_vx[1] - c.cmd_back_vx[0]), 0.0,
+                         jax.random.uniform(k_w, (), minval=-0.3, maxval=0.3)])
+        lat = jp.array([0.0, sign * (c.cmd_lat_abs[0] + u * (c.cmd_lat_abs[1] - c.cmd_lat_abs[0])), 0.0])
+        m = jax.random.uniform(k_mode, ())
+        p1 = c.cmd_p_turn
+        p2 = p1 + c.cmd_p_back
+        p3 = p2 + c.cmd_p_lateral
+        cmd = jp.where(m < p1, turn, jp.where(m < p2, back, jp.where(m < p3, lat, cmd)))
+        stand = jax.random.uniform(k_stand, ()) < c.cmd_stand_prob
         return jp.where(stand, jp.zeros(3), cmd)
 
     # ------------------------------------------------------------------ arm
@@ -318,7 +346,8 @@ class Go2ArmEnv(Go2StairsEnv):
         contact_filt = contact | info["last_contact"]
         first_contact = (info["feet_air_time"] > 0.0) & contact_filt
         air_time = info["feet_air_time"] + self._dt
-        moving = jp.linalg.norm(command[:2]) > cfg.cmd_deadband
+        moving = (jp.linalg.norm(command[:2]) > cfg.cmd_deadband) | (
+            cfg.turn_is_moving & (jp.abs(command[2]) > cfg.cmd_deadband))
         walking = (command[0] > cfg.progress_min_vx).astype(jp.float32)
         air_time_rew = jp.sum(jp.clip(air_time - cfg.air_time_threshold, min=0.0) * first_contact) * moving
 

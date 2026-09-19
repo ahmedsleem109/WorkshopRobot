@@ -23,6 +23,24 @@ from bw.sim.workshop_sim import GRIPPER_CLOSED, GRIPPER_OPEN, WorkshopSim
 # Half-width of the grasped section ACROSS the jaws (lateral), per tool.
 GRASP_HALF_WIDTH = {"wrench_10mm": 0.0065, "wrench_13mm": 0.008, "screwdriver": 0.0125,
                     "pliers": 0.0075, "tape_roll": 0.0035}
+# Squeeze per tool, as a FORCE (N); the close command is derived from it: the finger servo
+# pushes GRIP_KP x (contact travel - command), and contact travel is GRASP_HALF_WIDTH.
+# One squeeze does not fit all, measured 2026-09-19 (scripts/_grip_force_probe.py, transfer
+# benchmarks, finger traces):
+#   * ~20 N (the old -8 mm command at kp 1200): the 13 mm wrench creeps through the pads at a
+#     median 55 mm/s with the arm held still; pliers fall out in transit.
+#   * ~60 N: 13 mm wrench 3.4 mm/s, pliers grasp 21/25 -> 25/25. But the 10 mm wrench's thin
+#     section is EXTRUDED -- finger travel closes 7.6 -> 7.3 mm over half a second, then the
+#     tool squirts out and the jaws slam shut (3/25 in transit) -- and the tape roll's curved
+#     rim wedges out of the jaws (transfer 21/25 -> 13/25).
+# A real gripper is run the same way (force per object), and the command is in the action.
+GRIP_FORCE = {"wrench_10mm": 20.0, "wrench_13mm": 60.0, "screwdriver": 60.0,
+              "pliers": 60.0, "tape_roll": 18.0}
+
+
+def grip_close_cmd(name: str) -> float:
+    from bw.sim.build_models import GRIP_KP
+    return max(GRIPPER_CLOSED, GRASP_HALF_WIDTH[name] - GRIP_FORCE[name] / GRIP_KP)
 PRE = 0.13               # stand-off along the approach before closing in
 RETREAT = 0.13           # enough to clear the rack; further only shakes the tool
 HOLD_VERIFY = 4.0        # seconds the tool must stay in the jaws AFTER the motion ends.
@@ -141,6 +159,7 @@ def run_grasp(sim: WorkshopSim, ik: ArmIK, name: str, rng: np.random.Generator,
     collector (T6) can store it as a per-frame label.
     """
     ph = on_phase if on_phase is not None else (lambda _label: None)
+    closed = grip_close_cmd(name)
     ph("plan")
     plan = plan_grasp(sim, ik, name, rng)
     if plan is None:
@@ -172,8 +191,8 @@ def run_grasp(sim: WorkshopSim, ik: ArmIK, name: str, rng: np.random.Generator,
             "tool_shift": round(float(np.linalg.norm(sim.gt_tool_pos(name) - plan_tool)), 4),
             "open": round(op, 2)}
     ph("close")
-    sim.move_arm(arm7(q, GRIPPER_CLOSED), rng.uniform(0.6, 0.9), record)
-    sim.move_arm(arm7(q, GRIPPER_CLOSED), 0.3, record)
+    sim.move_arm(arm7(q, closed), rng.uniform(0.6, 0.9), record)
+    sim.move_arm(arm7(q, closed), 0.3, record)
     # One re-approach if the jaws closed on nothing: the tool leans inside its slot, so a
     # plan made from its settled pose can still miss by a centimetre. A demonstrator that
     # retries is also what the orchestrator's on_failure transition does later.
@@ -185,16 +204,16 @@ def run_grasp(sim: WorkshopSim, ik: ArmIK, name: str, rng: np.random.Generator,
         deeper = grasp_point(sim, name) + 0.012 * a
         q = cartesian(sim, ik, q, sim.ee_pos(), deeper, Rg, op, 0.8, record)
         sim.move_arm(arm7(q, op), 0.3, record)
-        sim.move_arm(arm7(q, GRIPPER_CLOSED), 0.7, record)
-        sim.move_arm(arm7(q, GRIPPER_CLOSED), 0.3, record)
+        sim.move_arm(arm7(q, closed), 0.7, record)
+        sim.move_arm(arm7(q, closed), 0.3, record)
         site = deeper
     diag["pad_contacts"] = sorted(_pad_contacts(sim, name))
     diag["grip_q"] = round(float(sim.arm_q()[6]), 4)
     ph("lift")
-    q = cartesian(sim, ik, q, site, site + np.array([0, 0, LIFT]), Rg, GRIPPER_CLOSED,
+    q = cartesian(sim, ik, q, site, site + np.array([0, 0, LIFT]), Rg, closed,
                   rng.uniform(1.2, 1.6), record)
     ph("lift_settle")
-    sim.move_arm(arm7(q, GRIPPER_CLOSED), 0.4, record)      # settle before translating
+    sim.move_arm(arm7(q, closed), 0.4, record)      # settle before translating
     diag["lift_only"] = round(float(sim.gt_tool_pos(name)[2] - z0), 3)
     diag["ee_lift"] = round(float(sim.ee_pos()[2] - site[2]), 3)
     diag["pads_after_lift"] = sorted(_pad_contacts(sim, name))
@@ -202,7 +221,7 @@ def run_grasp(sim: WorkshopSim, ik: ArmIK, name: str, rng: np.random.Generator,
     # over the rack in joint space knocks it out of the jaws on the way past.
     up = site + np.array([0, 0, LIFT])
     ph("retreat")
-    q = cartesian(sim, ik, q, up, up - RETREAT * np.array([a[0], a[1], 0.0]), Rg, GRIPPER_CLOSED,
+    q = cartesian(sim, ik, q, up, up - RETREAT * np.array([a[0], a[1], 0.0]), Rg, closed,
                   rng.uniform(1.6, 2.1), record)
     diag["after_retreat"] = round(float(sim.gt_tool_pos(name)[2] - z0), 3)
     # The demonstration ENDS here: tool lifted clear of the rack and retracted, gripper still
@@ -210,7 +229,7 @@ def run_grasp(sim: WorkshopSim, ik: ArmIK, name: str, rng: np.random.Generator,
     # the grasp skill -- and a joint-space fold with a tool in the jaws was measured dropping
     # it, because re-rolling the wrist levers the tool out of the pads.
     ph("hold")
-    sim.move_arm(np.concatenate([q, [GRIPPER_CLOSED]]), 0.6, record)
+    sim.move_arm(np.concatenate([q, [closed]]), 0.6, record)
     # VERIFY, do not record: hold the arm still for HOLD_VERIFY seconds and require the tool
     # to still be there. Scoring at the instant the motion stops is what made the old
     # benchmark read 69% while only 31% of those grasps survived two more seconds -- the tool

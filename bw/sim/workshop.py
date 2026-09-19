@@ -34,8 +34,14 @@ ROOT = Path(__file__).resolve().parents[2]
 MODELS = ROOT / "models"
 
 STEP_HEIGHT = 0.12
-WALKWAY_X = (1.3, 4.4)
+WALKWAY_X = (1.3, 4.45)             # runs up to the bench, so station A's front feet are on it
 WALKWAY_Y = (-1.6, 1.6)
+# Landing strip off the walkway's right edge, under table B's near side. Station B faces -y at
+# y=-1.57, which puts the Go2's front feet at y=-1.76: 16 cm PAST the walkway edge, over the
+# 12 cm drop. That was invisible while the base was teleported with its legs pinned; a walking
+# robot cannot stand there. The strip is at walkway height, so table B is still 0.63 m above
+# the surface the robot stands on -- the same as table A -- and every reach/place number holds.
+WALKWAY_SPUR_B = ((2.25, 3.15), (-1.95, -1.55))
 BENCH_HEIGHT = 0.75
 BENCH_X = (4.45, 5.05)
 BENCH_Y = (-0.9, 0.9)
@@ -285,6 +291,7 @@ def build_workshop_xml(robot_file: str = "go2z1_scene_robot.xml") -> str:
     rng = np.random.default_rng(0)
     wx0, wx1 = WALKWAY_X
     wy0, wy1 = WALKWAY_Y
+    (sbx0, sbx1), (sby0, sby1) = WALKWAY_SPUR_B
     bx0, bx1 = BENCH_X
     by0, by1 = BENCH_Y
     tbx0, tbx1 = TABLE_B_X
@@ -363,6 +370,9 @@ def build_workshop_xml(robot_file: str = "go2z1_scene_robot.xml") -> str:
       friction="0.8 0.02 0.01" contype="7" conaffinity="7"/>
     <geom name="walkway_edge" type="box" size="0.02 {(wy1-wy0)/2:.3f} {STEP_HEIGHT/2+0.0005:.4f}"
       pos="{wx0+0.02:.3f} {(wy0+wy1)/2:.3f} {STEP_HEIGHT/2:.3f}" material="hazard" contype="0" conaffinity="0"/>
+    <geom name="walkway_spur_b" type="box" size="{(sbx1-sbx0)/2:.3f} {(sby1-sby0)/2:.3f} {STEP_HEIGHT/2:.3f}"
+      pos="{(sbx0+sbx1)/2:.3f} {(sby0+sby1)/2:.3f} {STEP_HEIGHT/2:.3f}" material="walkway" condim="3"
+      friction="0.8 0.02 0.01" contype="7" conaffinity="7"/>
 
     <!-- bench -->
     <body name="bench" pos="{(bx0+bx1)/2:.3f} {(by0+by1)/2:.3f} 0">

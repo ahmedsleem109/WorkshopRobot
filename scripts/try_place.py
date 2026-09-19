@@ -1,14 +1,16 @@
 """T2.3 benchmark: full two-table transfer -- pick from the rack, move, place in the zone.
 
     render_venv\\Scripts\\python.exe scripts\\try_place.py [seeds] [--table table_a|table_b]
-                                                           [--roll DEG] [-v]
+                                                           [--roll DEG] [--walk [NPZ]] [-v]
 
 Stages: grasp (the pick failed -- see try_grasp.py) -> place_ik -> outside_zone (released,
 but the tool did not end up in the marked zone) -> not_settled (still moving 2 s later) ->
 still_held -> ok.
 
-The base move between stations is WorkshopSim.teleport_base, a deliberate stand-in for Layer
-3 navigation; this benchmark scores the manipulation, and T5/T9 own the walking.
+By default the base move between stations is WorkshopSim.teleport_base, a stand-in for Layer 3
+that scores the manipulation alone. With --walk the legs belong to the walking policy for the
+WHOLE episode (standing through the grasp and the place) and the base walks to the station
+(bw/locomotion/navigate.py); failures of the walk itself are the stages walk_fell / walk_timeout.
 """
 import argparse
 import sys
@@ -34,6 +36,8 @@ from bw.task.spec import Snapshot, Task, evaluate
 def stage(g, p):
     if not g["success"]:
         return "grasp"
+    if p.get("reason") in ("walk_fell", "walk_timeout"):
+        return p["reason"]
     if p.get("reason") == "place_ik_fail":
         return "place_ik"
     if p.get("reason") == "not_holding":
@@ -50,6 +54,8 @@ def main():
     ap.add_argument("--roll", type=float, default=None, help="PLACE_ROLL in degrees")
     ap.add_argument("--back", type=float, default=None,
                     help="override the station's distance behind the zone centre (m)")
+    ap.add_argument("--walk", nargs="?", const=str(ROOT / "models/payload_nav_policy.npz"),
+                    default=None, help="walk between stations with this policy .npz")
     ap.add_argument("-v", action="store_true")
     args = ap.parse_args()
     if args.roll is not None:
@@ -62,7 +68,11 @@ def main():
         station = (zx - args.back * np.cos(yaw), zy - args.back * np.sin(yaw), yaw)
 
     sim = WorkshopSim()
+    if args.walk:
+        from bw.locomotion.navigate import walk_to
+        sim.attach_locomotion(args.walk)
     ik = ArmIK(sim.m)
+    walks = []
     stages = Counter()
     per = {t: Counter() for t in GRASP_TOOLS}
     dists = []
@@ -75,7 +85,15 @@ def main():
             start = Snapshot.take(sim, present)
             g = run_grasp(sim, ik, tool, rng)
             p = {}
-            if g["success"]:
+            if g["success"] and args.walk:
+                w = walk_to(sim, station)
+                walks.append(w)
+                if not w["success"]:
+                    p = {"reason": "walk_fell" if w["fell"] else "walk_timeout", "walk": w}
+                else:
+                    sim.settle(0.3)
+                    p = {**run_place(sim, ik, tool, args.table, rng), "walk": w}
+            elif g["success"]:
                 sim.teleport_base(station, carry=tool)
                 sim.settle(0.3)
                 p = run_place(sim, ik, tool, args.table, rng)
@@ -97,6 +115,12 @@ def main():
     for t in GRASP_TOOLS:
         print(f"  {t:12s} {per[t]['ok']}/{sum(per[t].values())}   {dict(per[t])}")
     print("overall", dict(stages), f"success {stages['ok'] / max(n, 1):.0%}")
+    if walks:
+        ok = [w for w in walks if w["success"]]
+        print(f"walks: {len(ok)}/{len(walks)} reached the station; "
+              + (f"final error median {np.median([w['err_xy_mm'] for w in ok]):.0f} mm / "
+                 f"{np.median([w['err_yaw_deg'] for w in ok]):.1f} deg, "
+                 f"median {np.median([w['time_s'] for w in ok]):.1f} s" if ok else ""))
     if dists:
         print(f"placed {np.median(dists) * 1000:.0f} mm from the zone centre (median), "
               f"worst {max(dists) * 1000:.0f} mm")

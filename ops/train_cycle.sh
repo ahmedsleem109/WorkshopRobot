@@ -13,7 +13,7 @@ WORK_S=${1:-10800}          # 3 h of training
 REST_S=${2:-900}            # 15 min cooling
 PAT='bw[.]locomotion[.]train_payload'
 LOG=~/bringwrench/logs/train_cycle.log
-EVALS=~/bringwrench/logs/payload.log
+EVALS=~/bringwrench/logs/${3:-payload}.log
 
 say() { echo "$(date '+%m-%d %H:%M:%S') $*" >> "$LOG"; }
 

@@ -1,0 +1,144 @@
+# RUN 3 (payload_nav3). Run 2 (sigma 0.1) at 7M: turn right -0.53/-0.6, turn left
+# +0.54/+0.6 (learned natively by 7M), sidestep right emerging (-0.10/-0.2) -- but backing up
+# still 0.00, and it is the one skill the table-B route cannot do without (turning in place
+# at the rack drifts the base 14 cm into the bench). Warm start = run 2 @ 7M; back-up raised
+# to 35% of commands, turns cut to 10%.
+# RUN 2 (payload_nav2), 2026-09-19. Run 1 (tracking_sigma 0.25, warm start = the 33M
+# payload checkpoint) was stopped at 5.2M: CPU tracking at 1.7M and 5.2M was unchanged --
+# turn in place, back up, sidestep and 0.15 m/s all still STOOD STILL, while reward rose only
+# through longer episodes. Not exploration (action std ~0.5, highest on turn commands). The
+# reward: stepping costs ~0.3-0.4/step in penalties (eval logs), while ignoring a command
+# cost only 0.26/step at 0.15 m/s and 0.66 backing at 0.25 m/s under sigma 0.25 -- standing
+# WAS the optimum. sigma 0.1 makes ignoring a command cost 0.60 / 1.40 / 1.46 (slow / back /
+# turn). Warm start = run 1's 5.2M checkpoint (already on the new command ranges).
+# NAVIGATION fine-tune: turn in place, back up, sidestep. Warm start = the 33M payload
+# checkpoint (the one the Phase 1 gate was run on).
+#
+# WHY (measured 2026-09-19, CPU controller and MJX agree to ~5%): that policy walks forward
+# at >= 0.2 m/s and makes gentle LEFT arcs, and nothing else. Pure yaw (0,0,0.5): 0.7 deg in
+# 3 s. Sidestep: 0 m. vx < 0.2: stands. (0.2, 0, -0.6): stands. The two-table transfer starts
+# with the robot's nose 10 cm from the bench and must turn around on a 3 m walkway, which
+# that policy cannot do; the transfer clip used a kinematic slide instead, and that is what
+# this run exists to replace. Changes, each tied to a cause in the reward:
+#   * cmd_p_turn/back/lateral: 45% of commands are the modes it never saw;
+#   * cmd_vx lower bound -0.3 in the general mode; wz range +-1.0;
+#   * turn_is_moving: the air-time (gait) reward now pays during turns, which is why it
+#     shuffled/stood instead of stepping;
+#   * w_ang_vel 0.8 -> 1.5: yaw error was too cheap next to w_lin_vel 3.0;
+#   * flat_frac 0.2 -> 0.5: navigation is mostly on the flat walkway; the step stays in.
+run_name: payload_nav3
+env_class: stairs
+rest_every_s: 900
+rest_seconds: 120
+scene: unused-generated-by-env
+init_params: /home/sleem/bringwrench/runs/results/2026-09-19_14-19-15-payload_nav2/checkpoints/step_6963200
+network:
+  policy:
+  - 512
+  - 256
+  - 128
+  value:
+  - 512
+  - 256
+  - 128
+ppo:
+  num_timesteps: 8000000
+  num_envs: 4096
+  episode_length: 1000
+  unroll_length: 20
+  batch_size: 256
+  num_minibatches: 16
+  num_updates_per_batch: 4
+  learning_rate: 0.0002
+  max_grad_norm: 1.0
+  entropy_cost: 0.01
+  discounting: 0.97
+  gae_lambda: 0.95
+  clipping_epsilon: 0.2
+  reward_scaling: 0.1
+  normalize_observations: true
+  num_evals: 10
+  num_eval_envs: 128
+  log_training_metrics: true
+  seed: 0
+env:
+  n_frames: 10
+  action_scale: 0.5
+  episode_length: 1000
+  history_len: 5
+  n_steps: 1
+  run_max: 0.35
+  stair_width: 2.5
+  approach: 2.0
+  landing: 2.0
+  box_depth: 0.8
+  spawn_back: 2.0
+  cmd_vx:
+  - -0.3
+  - 0.9
+  cmd_vy:
+  - -0.2
+  - 0.2
+  cmd_wz:
+  - -1.0
+  - 1.0
+  level_init: 4
+  level_min: 3
+  promote_success: 0.65
+  demote_success: 0.25
+  success_ema_alpha: 0.05
+  flat_frac: 0.5
+  success_margin: 0.05
+  min_rel_height: 0.18
+  max_rel_height: 0.62
+  max_pitch: 0.6109
+  max_roll: 0.4363
+  back_margin: 100.0
+  w_progress: 2.0
+  progress_cap: 1.0
+  w_height_gain: 3.0
+  height_gain_cap: 0.5
+  w_clearance: 5.0
+  clearance_margin: 0.05
+  w_slip: 0.2
+  w_lin_vel: 3.0
+  w_ang_vel: 1.5
+  w_air_time: 1.0
+  air_time_threshold: 0.15
+  tracking_sigma: 0.1
+  w_torque: 0.0001
+  w_action_rate: 0.02
+  w_joint_vel: 0.0005
+  w_joint_acc: 5.0e-07
+  w_ang_damp: 0.05
+  w_joint_limit: 10.0
+  w_collision: 1.0
+  w_termination: 1.0
+  target_height: 0.28
+  w_orientation: 0.5
+  w_base_height: 0.5
+  dr_enable: true
+  latency_max: 1.0
+  noise_proj_grav: 0.05
+  noise_gyro: 0.2
+  noise_accel: 0.5
+  noise_joint_pos: 0.01
+  noise_joint_vel: 1.5
+  push_interval:
+  - 8.0
+  - 15.0
+  push_vel: 0.5
+  asymmetric: true
+  actor_privileged: true
+  arm_p_stowed: 0.35
+  arm_p_extended: 0.25
+  arm_speed: 1.2
+  w_arm_stab: 0.3
+  cross_margin: 0.4
+  cmd_stand_prob: 0.2
+  cmd_resample_s: 5.0
+  progress_min_vx: 0.2
+  cmd_p_turn: 0.1
+  cmd_p_back: 0.35
+  cmd_p_lateral: 0.15
+  turn_is_moving: true

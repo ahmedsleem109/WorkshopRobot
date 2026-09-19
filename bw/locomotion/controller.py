@@ -57,17 +57,52 @@ class NumpyPolicy:
         for i, (W, b) in enumerate(zip(self.W, self.b)):
             x = x @ W + b
             if i < len(self.W) - 1:
-                x = np.maximum(x, 0.0)
+                # brax make_ppo_networks' default activation is SWISH, not ReLU. With ReLU
+                # here the exported policy barely walked (0.19 m in 3 s at vx=0.5).
+                x = x / (1.0 + np.exp(-x))
         return np.tanh(x[:N_LEG])
 
 
+# Left-right mirror of the Go2 (legs FL,FR,RL,RR x hip,thigh,calf; home hips are 0).
+_LEG_PERM = np.array([3, 4, 5, 0, 1, 2, 9, 10, 11, 6, 7, 8])
+_LEG_SIGN = np.array([-1.0, 1, 1] * 4)
+_FRAME_SIGN = np.concatenate([
+    [1, -1, 1],          # world linear velocity (world reflected about its xz-plane)
+    [1, -1, 1],          # projected gravity
+    [-1, 1, -1],         # gyro: a pseudo-vector
+    [1, -1, 1],          # accelerometer
+])
+
+
+def mirror_legs(v: np.ndarray) -> np.ndarray:
+    return v[_LEG_PERM] * _LEG_SIGN
+
+
+def mirror_frame(f: np.ndarray) -> np.ndarray:
+    out = f.copy()
+    out[:12] = f[:12] * _FRAME_SIGN
+    for a in (12, 24, 36):                       # joint pos, joint vel, last action
+        out[a:a + 12] = mirror_legs(f[a:a + 12])
+    out[48:51] = f[48:51] * [1, -1, -1]          # command (vx, vy, wz)
+    return out
+
+
 class Locomotion:
-    """Drives the Go2 legs in a CPU MjData at 50 Hz. The arm is untouched."""
+    """Drives the Go2 legs in a CPU MjData at 50 Hz. The arm is untouched.
+
+    MIRRORING. The nav fine-tune (configs/payload_nav.yaml, run 2) learned turn-in-place to
+    the RIGHT (-0.56 of -0.6 rad/s at 5.6M steps) but still stands still when asked to turn
+    LEFT. The Go2 is left-right symmetric and the policy does not observe the arm, so a left
+    turn is a mirrored right turn: mirror the observation history, ask the policy, mirror its
+    action back. This is the deployment-time form of symmetry augmentation. `mirror_when`
+    decides per tick; by default it mirrors pure left turns only.
+    """
 
     scale_gyro, scale_dof_vel, scale_accel, obs_clip = 0.25, 0.05, 0.05, 100.0
     action_scale, history_len, frame = 0.5, 5, 51
-    # Commands the policy was trained on (configs/payload.yaml).
-    vx_range, vy_range, wz_range = (0.0, 0.9), (-0.2, 0.2), (-0.6, 0.6)
+    # Commands the navigation policy was trained on (configs/payload_nav.yaml: general mode
+    # plus the back / sidestep / turn-in-place modes).
+    vx_range, vy_range, wz_range = (-0.4, 0.9), (-0.3, 0.3), (-1.0, 1.0)
 
     def __init__(self, model: mujoco.MjModel, data: mujoco.MjData, policy_npz: str | Path):
         self.m, self.d = model, data
@@ -84,6 +119,8 @@ class Locomotion:
         self.n_substeps = int(round(0.02 / model.opt.timestep))
         self.dt = self.n_substeps * model.opt.timestep
         self.base = model.body("base").id
+        self.mirror_when = lambda cmd: cmd[2] > 0.05 and abs(cmd[0]) < 0.2 and abs(cmd[1]) < 0.1
+        self.mirrored = False
         self.reset()
 
     # -------------------------------------------------------------- interface
@@ -111,7 +148,12 @@ class Locomotion:
     # ----------------------------------------------------------- control loop
     def pre_physics(self):
         """Compute a_k from the latest observation and write leg ctrl."""
-        a = self.policy(self.hist)
+        self.mirrored = bool(self.mirror_when(self.command))
+        if self.mirrored:
+            h = self.hist.reshape(self.history_len, self.frame)
+            a = mirror_legs(self.policy(np.concatenate([mirror_frame(f) for f in h])))
+        else:
+            a = self.policy(self.hist)
         self.action = a
         target = np.clip(self.default_ctrl + self.action_scale * a, self.ctrl_lo, self.ctrl_hi)
         self.d.ctrl[:N_LEG] = target

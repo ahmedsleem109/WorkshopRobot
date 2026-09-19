@@ -204,6 +204,13 @@ def plan_place(sim: WorkshopSim, ik: ArmIK, name: str, table: str, rng):
     return best
 
 
+def _lean_xy(sim: WorkshopSim, name: str) -> np.ndarray:
+    """Horizontal direction the held tool's UPPER end points (its long axis is body x)."""
+    ax = sim.d.xmat[sim.tool_body[name]].reshape(3, 3)[:, 0]
+    up = ax if ax[2] > 0 else -ax
+    return up[:2].copy()
+
+
 def _servo_xy(sim: WorkshopSim, ik: ArmIK, name: str, target_xy, R, grip, record,
               passes: int = 4, tol: float = 0.004):
     """Nudge the gripper horizontally until the HELD tool is over `target_xy`."""
@@ -250,6 +257,19 @@ def run_place(sim: WorkshopSim, ik: ArmIK, name: str, table: str, rng,
     # is allowed ground truth, the policy trained on it is not.
     ph("place_align")
     q = _servo_xy(sim, ik, name, plan["target"], R, grip, record)
+    # Re-aim from the tool's MEASURED lean, now that it hangs where the arm will release it.
+    # It topples the way its upper end points (cos = +1.00 over 25 transfers), so the shift
+    # goes the other way. The plan's approach-axis shift is only the prior: under a 60 N
+    # squeeze the pliers hang leaning AWAY from the robot and toppled 90 mm away, so a fixed
+    # shift pushed them further out. Nearly vertical (< ~1 deg) -> keep the prior.
+    # The tape roll is excluded: a ring has no long axis to lean, and it does not topple.
+    lean = _lean_xy(sim, name)
+    if name != "tape_roll" and 0.015 < np.linalg.norm(lean) < 0.5:
+        zx, zy = PLACE_ZONE[table]
+        jit = np.array(plan["target"]) - (np.array([zx, zy]) + PLACE_AIM_SHIFT * a[:2])
+        tgt = np.array([zx, zy]) - PLACE_AIM_SHIFT * lean / np.linalg.norm(lean) + jit
+        plan["target"] = (float(tgt[0]), float(tgt[1]))
+        q = _servo_xy(sim, ik, name, plan["target"], R, grip, record)
     p_rel = release_pose(sim, name, plan["target"], R)
     diag_repoint = round(float(np.linalg.norm(
         sim.gt_tool_pos(name)[:2] - np.array(plan["target"]))), 4)
