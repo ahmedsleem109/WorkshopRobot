@@ -235,6 +235,38 @@ class WorkshopSim:
                 break
         return t
 
+    def teleport_base(self, pose, carry: str | None = None):
+        """Move the base to (x, y, yaw) as a rigid SE(2) transform, carrying `carry` with it.
+
+        This is the manipulation benchmark's STAND-IN for Layer 3 navigation, and it is a
+        stand-in on purpose: the two-table transfer needs the base at a different station for
+        the place than for the pick, and walking there is the locomotion policy's job (T5/T9),
+        not the grasp demonstrator's. A held tool is a free body, so it must be transformed by
+        the same delta or the teleport simply drops it.
+        """
+        d = self.d
+        x0, y0 = float(d.qpos[0]), float(d.qpos[1])
+        yaw0 = self.get_base_yaw()
+        x1, y1, yaw1 = pose
+        dyaw = yaw1 - yaw0
+        c, s_ = np.cos(dyaw), np.sin(dyaw)
+        R = np.array([[c, -s_, 0.0], [s_, c, 0.0], [0.0, 0.0, 1.0]])
+        dq = np.array([np.cos(dyaw / 2), 0.0, 0.0, np.sin(dyaw / 2)])
+
+        def xform(p):
+            rel = np.asarray(p, float) - np.array([x0, y0, 0.0])
+            return R @ rel + np.array([x1, y1, 0.0])
+
+        if carry is not None:
+            qa = self.tool_qadr[carry]
+            d.qpos[qa:qa + 3] = xform(d.qpos[qa:qa + 3])
+            d.qpos[qa + 3:qa + 7] = _quat_mul(dq, d.qpos[qa + 3:qa + 7])
+        d.qpos[0], d.qpos[1] = x1, y1
+        d.qpos[3:7] = _quat_mul(dq, d.qpos[3:7])
+        d.qvel[:] = 0
+        mujoco.mj_forward(self.m, self.d)
+        self._hold_qpos = d.qpos[:19].copy()
+
     def set_arm_target(self, q: np.ndarray):
         """q is the 7-vector command (6 joints + finger travel); both finger servos get it."""
         m = self.m

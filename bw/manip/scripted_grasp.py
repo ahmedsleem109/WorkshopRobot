@@ -25,7 +25,9 @@ GRASP_HALF_WIDTH = {"wrench_10mm": 0.0065, "wrench_13mm": 0.008, "screwdriver": 
                     "pliers": 0.0075, "tape_roll": 0.0035}
 PRE = 0.13               # stand-off along the approach before closing in
 RETREAT = 0.13           # enough to clear the rack; further only shakes the tool
-HOLD_VERIFY = 2.0        # seconds the tool must stay in the jaws AFTER the motion ends
+HOLD_VERIFY = 4.0        # seconds the tool must stay in the jaws AFTER the motion ends.
+                         # 2 s was too lenient and hid a real failure: the pliers passed it
+                         # 24/25 and then dropped at ~2.3 s (see GRASP_Z in workshop.py).
 TAPE_PHI = np.radians(45.0)   # tape roll: grasp this far ABOVE the ring's equator. Swept in
                               # scripts/_tape_sweep.py (8 seeds, held-2s): 0 deg 2/8 (jaws hit
                               # the rack, site_err 13.9 mm), 15 6/8, 30 7/8, 45 8/8 (site_err

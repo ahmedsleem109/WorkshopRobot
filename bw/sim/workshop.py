@@ -62,6 +62,73 @@ HANDOFF_TRAY = (-0.25, 1.8)
 HUMAN_POS = (-0.75, 2.05)
 BOX_PARK = (0.0, -8.0)              # scenario-3 obstacle, parked out of the scene
 
+# ---------------------------------------------------------------- the second table (T2)
+# Language-commanded TRANSFER needs two surfaces the instruction can name. Table B sits off
+# the walkway's right-hand edge, level with the middle of the walkway, so that:
+#   * both stations are served from the SAME proven geometry -- 0.55 m in front of the base
+#     at bench height, which is the reach the rack station was measured at (RACK_CENTER is
+#     0.55 m in front of base x 4.05). Nothing about the arm's workspace is being re-litigated;
+#   * the 12 cm step stays on the route to BOTH tables (the walkway starts at x 1.3 and the
+#     robot stands on it for either station);
+#   * every name the language uses is unambiguous, in two independent schemes:
+#
+#       table A  the bench, holds the rack   y ~ +0.6   4.75 m from the start   LEFT,  FAR
+#       table B  bare top, place zone only   y ~ -1.9   3.29 m from the start   RIGHT, NEAR
+#
+#     "Left"/"right" are from the robot's start pose facing +x; "near"/"far" are straight-line
+#     distance from that start. The two schemes agree on which table is which, so a paraphrase
+#     can use either. Table A keeps the rack; table B is a bare top, so "pick from A, place on
+#     B" and "pick from B, place on A" are different tasks and the VLA cannot shortcut either.
+TABLE_B_X = (2.40, 3.00)
+TABLE_B_Y = (-2.50, -1.75)
+# Marked place zones -- painted rectangles, NOT trays. A lip would add a contact the place
+# skill has to fight on every episode; "inside the zone" is a geometric test either way.
+ZONE_HALF = 0.10
+# Zone centres sit well INBOARD of each table's near edge. At 0.15 m from the edge the zone's
+# own boundary was only 50 mm from it, and a tool released standing topples 80-130 mm as it
+# falls over -- the pliers went off the edge onto the floor. 0.25-0.30 m of margin keeps a
+# topple on the table.
+PLACE_ZONE = {"table_a": (4.70, 0.58), "table_b": (2.70, -2.05)}
+# Base pose that serves each zone: 0.65 m back from it, facing it. MEASURED, not assumed --
+# scripts/reach_audit.py sweeps standing distance x lateral offset x gripper roll and reports
+# how many zone targets IK can reach. A place target is LOWER than a rack grasp point (the
+# zone is the bench top at 0.75 m, the rack grasp sits 9-11 cm above it), so the arm is more
+# extended downward and the base has to stand further back: 0.55 m gives 3-4 of 5 targets,
+# 0.62-0.70 m gives 5 of 5. The rack station stays at 0.55 m, which is where it was measured.
+# 0.48 m back, MEASURED by sweeping it (scripts/try_place.py --back): 0.42 -> 10/16,
+# 0.48 -> 12/16, 0.55 -> 9/16, 0.62 -> 10/16. Nearer than the rack station because the
+# gripper must stand off from the zone by however far the held tool hangs.
+PLACE_STATION = {"table_a": (4.22, 0.58, 0.0), "table_b": (2.70, -1.57, -np.pi / 2)}
+# The rack station, for symmetry with the above (this is what WorkshopSim.reset randomises).
+RACK_STATION = (4.05, 0.0, 0.0)
+
+TABLES = {
+    "table_a": dict(label="the workbench", side="left", distance="far",
+                    aliases=("the bench", "the left table", "the far table",
+                             "the table with the rack", "the workbench")),
+    "table_b": dict(label="the side table", side="right", distance="near",
+                    aliases=("the side table", "the right table", "the near table",
+                             "the other table")),
+}
+
+
+def place_zone_z() -> float:
+    """World z of a place-zone surface (both tables are bench height)."""
+    return BENCH_HEIGHT
+
+
+def in_place_zone(pos, table: str, margin: float = 0.0) -> bool:
+    """Is a tool's position inside `table`'s marked zone AND resting on the top?
+
+    The height test is a band above the table rather than a tolerance around it: a tool that
+    ends up STANDING on its end is still on the table (a 13 mm wrench's centre is then 87 mm
+    up), while one still in the gripper or on the floor is not.
+    """
+    cx, cy = PLACE_ZONE[table]
+    return (abs(pos[0] - cx) <= ZONE_HALF + margin
+            and abs(pos[1] - cy) <= ZONE_HALF + margin
+            and -0.01 <= pos[2] - BENCH_HEIGHT <= 0.12)
+
 
 @dataclass(frozen=True)
 class ToolSpec:
@@ -166,12 +233,34 @@ STAND_QUAT_PLIERS = (-0.5, -0.5, -0.5, 0.5)
 # Height above the rack floor at which each standing tool is grasped: on a graspable
 # section, and clear of the rack plates (RACK_BASE + RACK_H = 0.05). The height the tool
 # itself STANDS at is computed from the compiled geometry -- see WorkshopSim._standing_offsets.
+# pliers 0.112 -> 0.080 (2026-09-18, session 3). Grasp height decides how far the grip sits
+# from the tool's CENTRE, and for the heaviest tool (180 g) that distance decides whether the
+# grip survives at all -- it pendulums out of the pads. Measured, 8 seeds, grip-to-centre
+# distance and how long the tool stays held:
+#     GRASP_Z 0.080 -> 53 mm, held 2 s 8/8, held 5 s 8/8
+#     GRASP_Z 0.095 -> 70 mm, held 2 s 8/8, held 5 s 2/8
+#     GRASP_Z 0.112 -> 92 mm, held 2 s 6/8, held 5 s 0/8
+#     GRASP_Z 0.130 -> grasp fails outright, 0/8
+# This is T1.4's hypothesis (d), which had never been tested. It also shrinks the offset the
+# place skill has to stand off from, which is what put the zone out of the arm's reach.
 GRASP_Z = {"wrench_10mm": 0.088, "wrench_13mm": 0.105, "screwdriver": 0.128,
-           "pliers": 0.112, "tape_roll": 0.0467}
+           "pliers": 0.080, "tape_roll": 0.0467}
+
+
+# The screwdriver stands HANDLE-DOWN (its +x up instead of down). Shaft-down it balanced a
+# 55 g handle on a 3.5 mm capsule tip and fell over ON ITS OWN in 9 of 40 untouched scenes
+# within 15 s (measured 2026-09-19) -- which the transfer benchmark then scored as the robot
+# having knocked it, and which also corrupts grounding views and training data. It is no
+# longer a grasp target, so stability beats orientation.
+STAND_QUAT_SCREWDRIVER = (0.7071, 0.0, -0.7071, 0.0)
 
 
 def stand_quat(name: str):
-    return STAND_QUAT_PLIERS if name == "pliers" else STAND_QUAT
+    if name == "pliers":
+        return STAND_QUAT_PLIERS
+    if name == "screwdriver":
+        return STAND_QUAT_SCREWDRIVER
+    return STAND_QUAT
 
 
 def default_tool_poses() -> dict[str, tuple[float, float, float]]:
@@ -188,7 +277,8 @@ def _clutter_xml(rng: np.random.Generator) -> str:
         ("offcut_a", "box", "0.12 0.04 0.02", (0.7, -0.9, 0.02), "wood"),
         ("offcut_b", "box", "0.20 0.03 0.015", (0.4, 1.0, 0.015), "wood"),
         ("bucket", "cylinder", "0.13 0.16", (-0.9, -1.2, 0.16), "bucket"),
-        ("reel", "cylinder", "0.16 0.06", (2.9, -1.35, 0.18), "bucket"),
+        # moved from (2.9, -1.35) 2026-09-18: that is now the table-B standing station
+        ("reel", "cylinder", "0.16 0.06", (2.0, 1.20, 0.18), "bucket"),
         ("crate", "box", "0.2 0.15 0.12", (4.0, 1.35, 0.24), "wood"),
         ("rag", "box", "0.08 0.08 0.004", (1.0, 0.45, 0.004), "rag"),
     ]
@@ -205,6 +295,8 @@ def build_workshop_xml(robot_file: str = "go2z1_scene_robot.xml") -> str:
     wy0, wy1 = WALKWAY_Y
     bx0, bx1 = BENCH_X
     by0, by1 = BENCH_Y
+    tbx0, tbx1 = TABLE_B_X
+    tby0, tby1 = TABLE_B_Y
     tools = "\n".join(_tool_xml(t, p) for t, p in zip(TOOLS, default_tool_poses().values()))
     rack_dividers = "\n".join(
         f'      <geom name="divider{k}" type="box" size="{RACK_GAP/2 + RACK_PLATE} {RACK_PLATE/2} {RACK_H/2}" '
@@ -259,6 +351,7 @@ def build_workshop_xml(robot_file: str = "go2z1_scene_robot.xml") -> str:
     <material name="human" rgba="0.25 0.35 0.55 1"/>
     <material name="skin" rgba="0.85 0.66 0.52 1"/>
     <material name="box" rgba="0.72 0.58 0.38 1"/>
+    <material name="zone" rgba="0.15 0.62 0.30 1"/>
   </asset>
 
   <worldbody>
@@ -298,6 +391,25 @@ def build_workshop_xml(robot_file: str = "go2z1_scene_robot.xml") -> str:
       <site name="tray_center" pos="0 0 0.05" size="0.01" group="4"/>
     </body>
 
+    <!-- table B: the transfer destination. Bare top, no rack (see TABLE_B_* in workshop.py) -->
+    <body name="table_b" pos="{(tbx0+tbx1)/2:.3f} {(tby0+tby1)/2:.3f} 0">
+      <geom name="table_b_top" type="box" size="{(tbx1-tbx0)/2:.3f} {(tby1-tby0)/2:.3f} 0.02" pos="0 0 {BENCH_HEIGHT-0.02:.3f}" material="bench" contype="7" conaffinity="7"/>
+      <geom type="box" size="0.03 0.03 {(BENCH_HEIGHT-0.04)/2:.3f}" pos="{(tbx1-tbx0)/2-0.05:.3f} {(tby1-tby0)/2-0.05:.3f} {(BENCH_HEIGHT-0.04)/2:.3f}" material="benchleg" contype="7" conaffinity="7"/>
+      <geom type="box" size="0.03 0.03 {(BENCH_HEIGHT-0.04)/2:.3f}" pos="{(tbx1-tbx0)/2-0.05:.3f} {-(tby1-tby0)/2+0.05:.3f} {(BENCH_HEIGHT-0.04)/2:.3f}" material="benchleg" contype="7" conaffinity="7"/>
+      <geom type="box" size="0.03 0.03 {(BENCH_HEIGHT-0.04)/2:.3f}" pos="{-(tbx1-tbx0)/2+0.05:.3f} {(tby1-tby0)/2-0.05:.3f} {(BENCH_HEIGHT-0.04)/2:.3f}" material="benchleg" contype="7" conaffinity="7"/>
+      <geom type="box" size="0.03 0.03 {(BENCH_HEIGHT-0.04)/2:.3f}" pos="{-(tbx1-tbx0)/2+0.05:.3f} {-(tby1-tby0)/2+0.05:.3f} {(BENCH_HEIGHT-0.04)/2:.3f}" material="benchleg" contype="7" conaffinity="7"/>
+    </body>
+
+    <!-- painted place zones: visual only (contype 0), so the place skill never fights a lip -->
+    <geom name="zone_table_a" type="box" size="{ZONE_HALF} {ZONE_HALF} 0.0012"
+      pos="{PLACE_ZONE["table_a"][0]:.3f} {PLACE_ZONE["table_a"][1]:.3f} {BENCH_HEIGHT+0.0012:.4f}"
+      material="zone" contype="0" conaffinity="0"/>
+    <geom name="zone_table_b" type="box" size="{ZONE_HALF} {ZONE_HALF} 0.0012"
+      pos="{PLACE_ZONE["table_b"][0]:.3f} {PLACE_ZONE["table_b"][1]:.3f} {BENCH_HEIGHT+0.0012:.4f}"
+      material="zone" contype="0" conaffinity="0"/>
+    <site name="zone_table_a_center" pos="{PLACE_ZONE["table_a"][0]:.3f} {PLACE_ZONE["table_a"][1]:.3f} {BENCH_HEIGHT:.3f}" size="0.01" group="4"/>
+    <site name="zone_table_b_center" pos="{PLACE_ZONE["table_b"][0]:.3f} {PLACE_ZONE["table_b"][1]:.3f} {BENCH_HEIGHT:.3f}" size="0.01" group="4"/>
+
     <!-- handoff: a low tray on the floor in front of the human -->
     <body name="handoff" pos="{HANDOFF_TRAY[0]} {HANDOFF_TRAY[1]} 0">
       <geom name="handoff_floor" type="box" size="0.2 0.16 0.004" pos="0 0 0.004" rgba="0.2 0.55 0.25 1" contype="7" conaffinity="7"/>
@@ -325,6 +437,9 @@ def build_workshop_xml(robot_file: str = "go2z1_scene_robot.xml") -> str:
 
     <camera name="overview" pos="-1.4 -3.2 2.6" xyaxes="0.85 -0.53 0 0.28 0.45 0.85"/>
     <camera name="bench_view" pos="3.2 -1.6 1.5" xyaxes="0.62 -0.78 0 0.35 0.28 0.89"/>
+    <!-- both INSIDE the room: wall_right sits at y = -3.0, so a camera beyond it sees a wall -->
+    <camera name="table_b_view" pos="4.00 -2.80 1.50" xyaxes="0.476 0.774 0 -0.354 0.218 0.906"/>
+    <camera name="scene_wide" pos="0.50 -2.75 2.60" xyaxes="0.545 -0.839 0 0.425 0.276 0.865"/>
 
 {tools}
   </worldbody>

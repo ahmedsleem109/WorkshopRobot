@@ -47,6 +47,7 @@
     <material name="human" rgba="0.25 0.35 0.55 1"/>
     <material name="skin" rgba="0.85 0.66 0.52 1"/>
     <material name="box" rgba="0.72 0.58 0.38 1"/>
+    <material name="zone" rgba="0.15 0.62 0.30 1"/>
   </asset>
 
   <worldbody>
@@ -91,6 +92,25 @@
       <site name="tray_center" pos="0 0 0.05" size="0.01" group="4"/>
     </body>
 
+    <!-- table B: the transfer destination. Bare top, no rack (see TABLE_B_* in workshop.py) -->
+    <body name="table_b" pos="2.700 -2.125 0">
+      <geom name="table_b_top" type="box" size="0.300 0.375 0.02" pos="0 0 0.730" material="bench" contype="7" conaffinity="7"/>
+      <geom type="box" size="0.03 0.03 0.355" pos="0.250 0.325 0.355" material="benchleg" contype="7" conaffinity="7"/>
+      <geom type="box" size="0.03 0.03 0.355" pos="0.250 -0.325 0.355" material="benchleg" contype="7" conaffinity="7"/>
+      <geom type="box" size="0.03 0.03 0.355" pos="-0.250 0.325 0.355" material="benchleg" contype="7" conaffinity="7"/>
+      <geom type="box" size="0.03 0.03 0.355" pos="-0.250 -0.325 0.355" material="benchleg" contype="7" conaffinity="7"/>
+    </body>
+
+    <!-- painted place zones: visual only (contype 0), so the place skill never fights a lip -->
+    <geom name="zone_table_a" type="box" size="0.1 0.1 0.0012"
+      pos="4.700 0.580 0.7512"
+      material="zone" contype="0" conaffinity="0"/>
+    <geom name="zone_table_b" type="box" size="0.1 0.1 0.0012"
+      pos="2.700 -2.050 0.7512"
+      material="zone" contype="0" conaffinity="0"/>
+    <site name="zone_table_a_center" pos="4.700 0.580 0.750" size="0.01" group="4"/>
+    <site name="zone_table_b_center" pos="2.700 -2.050 0.750" size="0.01" group="4"/>
+
     <!-- handoff: a low tray on the floor in front of the human -->
     <body name="handoff" pos="-0.25 1.8 0">
       <geom name="handoff_floor" type="box" size="0.2 0.16 0.004" pos="0 0 0.004" rgba="0.2 0.55 0.25 1" contype="7" conaffinity="7"/>
@@ -117,12 +137,15 @@
     <geom name="offcut_a" type="box" size="0.12 0.04 0.02" pos="0.7 -0.9 0.02" material="wood" contype="7" conaffinity="7"/>
     <geom name="offcut_b" type="box" size="0.20 0.03 0.015" pos="0.4 1.0 0.015" material="wood" contype="7" conaffinity="7"/>
     <geom name="bucket" type="cylinder" size="0.13 0.16" pos="-0.9 -1.2 0.16" material="bucket" contype="7" conaffinity="7"/>
-    <geom name="reel" type="cylinder" size="0.16 0.06" pos="2.9 -1.35 0.18" material="bucket" contype="7" conaffinity="7"/>
+    <geom name="reel" type="cylinder" size="0.16 0.06" pos="2.0 1.2 0.18" material="bucket" contype="7" conaffinity="7"/>
     <geom name="crate" type="box" size="0.2 0.15 0.12" pos="4.0 1.35 0.24" material="wood" contype="7" conaffinity="7"/>
     <geom name="rag" type="box" size="0.08 0.08 0.004" pos="1.0 0.45 0.004" material="rag" contype="7" conaffinity="7"/>
 
     <camera name="overview" pos="-1.4 -3.2 2.6" xyaxes="0.85 -0.53 0 0.28 0.45 0.85"/>
     <camera name="bench_view" pos="3.2 -1.6 1.5" xyaxes="0.62 -0.78 0 0.35 0.28 0.89"/>
+    <!-- both INSIDE the room: wall_right sits at y = -3.0, so a camera beyond it sees a wall -->
+    <camera name="table_b_view" pos="4.00 -2.80 1.50" xyaxes="0.476 0.774 0 -0.354 0.218 0.906"/>
+    <camera name="scene_wide" pos="0.50 -2.75 2.60" xyaxes="0.545 -0.839 0 0.425 0.276 0.865"/>
 
     <body name="wrench_10mm" pos="4.6000 -0.2400 0.8550" quat="0.7071 0.0 0.7071 0.0">
       <freejoint name="wrench_10mm_free"/>
@@ -138,7 +161,7 @@
       <geom name="wrench_13mm_open" type="box" size="0.0119 0.017 0.0045" pos="0.0772 0 0" material="chrome" mass="0.0160" contype="3" conaffinity="3" condim="6" friction="1.2 0.05 0.005" solref="0.003 1" solimp="0.99 0.9995 0.0005 0.5 2"/>
       <geom name="wrench_13mm_ring" type="cylinder" size="0.017 0.0045" pos="-0.0772 0 0" material="chrome" mass="0.0160" contype="3" conaffinity="3" condim="6" friction="1.2 0.05 0.005" solref="0.003 1" solimp="0.99 0.9995 0.0005 0.5 2"/>
     </body>
-    <body name="screwdriver" pos="4.6000 0.0000 0.8550" quat="0.7071 0.0 0.7071 0.0">
+    <body name="screwdriver" pos="4.6000 0.0000 0.8550" quat="0.7071 0.0 -0.7071 0.0">
       <freejoint name="screwdriver_free"/>
       <geom name="screwdriver_handle" type="cylinder" size="0.0125 0.035" pos="-0.045 0 0" quat="0.7071 0 0.7071 0" rgba="0.95 0.78 0.05 1" mass="0.055" contype="3" conaffinity="3" condim="6" friction="1.2 0.05 0.005" solref="0.003 1" solimp="0.99 0.9995 0.0005 0.5 2"/>
       <geom name="screwdriver_shaft" type="capsule" size="0.0035 0.045" pos="0.04 0 0" quat="0.7071 0 0.7071 0" material="chrome" mass="0.015" contype="3" conaffinity="3" condim="6" friction="1.2 0.05 0.005" solref="0.003 1" solimp="0.99 0.9995 0.0005 0.5 2"/>
@@ -170,8 +193,8 @@
     </body>
   </worldbody>
   <keyframe>
-    <key name="home" qpos="0 0 0.3 1 0 0 0 0 0.9 -1.8 0 0.9 -1.8 0 0.9 -1.8 0 0.9 -1.8 0 0 -0.05 0 0 0 0 0 4.6 -0.24 0.855 0.70711 0 0.70711 0 4.6 -0.12 0.855 0.70711 0 0.70711 0 4.6 0 0.855 0.70711 0 0.70711 0 4.6 0.12 0.855 -0.5 -0.5 -0.5 0.5 4.6 0.24 0.855 0.70711 0 0.70711 0" ctrl="0 0.9 -1.8 0 0.9 -1.8 0 0.9 -1.8 0 0.9 -1.8 0 0 -0.05 0 0 0 0"/>
-    <key name="extended" qpos="0 0 0.3 1 0 0 0 0 0.9 -1.8 0 0.9 -1.8 0 0.9 -1.8 0 0.9 -1.8 0 1.35 -0.45 -0.9 0 0 0.03 0 4.6 -0.24 0.855 0.70711 0 0.70711 0 4.6 -0.12 0.855 0.70711 0 0.70711 0 4.6 0 0.855 0.70711 0 0.70711 0 4.6 0.12 0.855 -0.5 -0.5 -0.5 0.5 4.6 0.24 0.855 0.70711 0 0.70711 0" ctrl="0 0.9 -1.8 0 0.9 -1.8 0 0.9 -1.8 0 0.9 -1.8 0 1.35 -0.45 -0.9 0 0 0.03"/>
-    <key name="ready" qpos="0 0 0.3 1 0 0 0 0 0.9 -1.8 0 0.9 -1.8 0 0.9 -1.8 0 0.9 -1.8 0 0.9 -1.2 0.3 0 0 0.035 0 4.6 -0.24 0.855 0.70711 0 0.70711 0 4.6 -0.12 0.855 0.70711 0 0.70711 0 4.6 0 0.855 0.70711 0 0.70711 0 4.6 0.12 0.855 -0.5 -0.5 -0.5 0.5 4.6 0.24 0.855 0.70711 0 0.70711 0" ctrl="0 0.9 -1.8 0 0.9 -1.8 0 0.9 -1.8 0 0.9 -1.8 0 0.9 -1.2 0.3 0 0 0.035"/>
+    <key name="home" qpos="0 0 0.3 1 0 0 0 0 0.9 -1.8 0 0.9 -1.8 0 0.9 -1.8 0 0.9 -1.8 0 0 -0.05 0 0 0 0 0 4.6 -0.24 0.855 0.70711 0 0.70711 0 4.6 -0.12 0.855 0.70711 0 0.70711 0 4.6 0 0.855 0.70711 0 -0.70711 0 4.6 0.12 0.855 -0.5 -0.5 -0.5 0.5 4.6 0.24 0.855 0.70711 0 0.70711 0" ctrl="0 0.9 -1.8 0 0.9 -1.8 0 0.9 -1.8 0 0.9 -1.8 0 0 -0.05 0 0 0 0"/>
+    <key name="extended" qpos="0 0 0.3 1 0 0 0 0 0.9 -1.8 0 0.9 -1.8 0 0.9 -1.8 0 0.9 -1.8 0 1.35 -0.45 -0.9 0 0 0.03 0 4.6 -0.24 0.855 0.70711 0 0.70711 0 4.6 -0.12 0.855 0.70711 0 0.70711 0 4.6 0 0.855 0.70711 0 -0.70711 0 4.6 0.12 0.855 -0.5 -0.5 -0.5 0.5 4.6 0.24 0.855 0.70711 0 0.70711 0" ctrl="0 0.9 -1.8 0 0.9 -1.8 0 0.9 -1.8 0 0.9 -1.8 0 1.35 -0.45 -0.9 0 0 0.03"/>
+    <key name="ready" qpos="0 0 0.3 1 0 0 0 0 0.9 -1.8 0 0.9 -1.8 0 0.9 -1.8 0 0.9 -1.8 0 0.9 -1.2 0.3 0 0 0.035 0 4.6 -0.24 0.855 0.70711 0 0.70711 0 4.6 -0.12 0.855 0.70711 0 0.70711 0 4.6 0 0.855 0.70711 0 -0.70711 0 4.6 0.12 0.855 -0.5 -0.5 -0.5 0.5 4.6 0.24 0.855 0.70711 0 0.70711 0" ctrl="0 0.9 -1.8 0 0.9 -1.8 0 0.9 -1.8 0 0.9 -1.8 0 0.9 -1.2 0.3 0 0 0.035"/>
   </keyframe>
 </mujoco>
