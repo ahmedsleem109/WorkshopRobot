@@ -6,7 +6,8 @@ What is on screen, and what it is NOT: no VLA has been trained yet (T6 -> T7). T
 is the instruction this episode is LABELLED with (bw/task/language.py), and the action is the
 SCRIPTED DEMONSTRATOR's 10 Hz arm command -- 6 joint targets + gripper travel -- i.e. exactly
 the (instruction, action) pair SmolVLA will be trained to reproduce. The base move between
-stations is WorkshopSim.teleport_base, a stand-in for Layer 3 walking, shown as a title card.
+stations is WorkshopSim.teleport_base, a stand-in for Layer 3 walking: a KINEMATIC slide on
+the wide shot (legs frozen), captioned as such.
 """
 import sys
 from pathlib import Path
@@ -49,6 +50,8 @@ steps_per_frame = int(round(1.0 / (FPS * sim.m.opt.timestep)))
 
 
 def camera():
+    if state.get("cam"):
+        return state["cam"]
     return "table_b_view" if state["stage"] == "PLACE" and TABLE == "table_b" else "bench_view"
 
 
@@ -108,15 +111,32 @@ def phase(label):
 
 
 sim.physics_step = stepped
-for _ in range(int(1.0 * FPS)):          # one second of the command on screen before motion
+# establishing shot: BOTH tables in frame before anything moves
+state["cam"] = "scene_wide"
+for _ in range(int(2.5 * FPS)):
+    frames.append(compose("table A: workbench + rack (left / far)     table B: side table (right / near)"))
+state["cam"] = None
+for _ in range(int(0.6 * FPS)):
     frames.append(compose())
 g = run_grasp(sim, ik, TOOL, rng, record=record, on_phase=phase)
 result = {"success": False, "reason": "grasp_" + g.get("reason", "fail")}
 if g["success"]:
-    card = compose(f"base walks to {TABLE.replace('_', ' ')} (Layer 3 -- not shown)")
-    frames.extend([card] * int(1.5 * FPS))
+    # Move the base between the tables on the wide shot, so both tables and the carry are
+    # visible. KINEMATIC slide, legs frozen: the walking policy (Layer 3) is not wired into
+    # this scene yet, and the caption says so.
     sim.physics_step = orig_step
-    sim.teleport_base(PLACE_STATION[TABLE], carry=TOOL)
+    state["cam"] = "scene_wide"
+    state["stage"], state["phase"] = "MOVE", "carry to " + TABLE.replace("_", " ")
+    x0, y0 = float(sim.d.qpos[0]), float(sim.d.qpos[1])
+    yaw0 = sim.get_base_yaw()
+    x1, y1, yaw1 = PLACE_STATION[TABLE]
+    n_move = int(3.5 * FPS)
+    for i in range(1, n_move + 1):
+        u = 0.5 - 0.5 * np.cos(np.pi * i / n_move)          # ease in / out
+        sim.teleport_base((x0 + (x1 - x0) * u, y0 + (y1 - y0) * u, yaw0 + (yaw1 - yaw0) * u),
+                          carry=TOOL)
+        frames.append(compose("base moved kinematically -- walking policy not wired in yet"))
+    state["cam"] = None
     sim.settle(0.3)
     sim.physics_step = stepped
     state["stage"] = "PLACE"

@@ -77,7 +77,9 @@ def grasp_point(sim: WorkshopSim, name: str) -> np.ndarray:
         sh = sim.d.xpos[sim.m.body("arm_link02").id]
         side = R[:, 1] if (pos - sh)[1] < 0 else -R[:, 1]
         return pos + tape_rim_dir(side, R[:, 2]) * 0.0415
-    up = -R[:, 0]                              # the tool's +x points down into the slot
+    up = -R[:, 0]                              # the tool's +x points down into the slot...
+    if up[2] < 0:                              # ...except the screwdriver, which stands
+        up = -up                               # handle-down (see stand_quat in workshop.py)
     if up[2] < 0.5:                            # knocked over / lying down: grasp its centre
         return pos
     along = (rack_floor_z() + GRASP_Z[name]) - pos[2]

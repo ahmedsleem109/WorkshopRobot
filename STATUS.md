@@ -1,48 +1,76 @@
 # STATUS — "Bring me the 10mm wrench"
 
-Last updated **2026-09-18, end of session 2**. Read this, then `REMAINING.md` for what to do
+Last updated **2026-09-19, end of session 3**. Read this, then `REMAINING.md` for what to do
 next (tasks are ordered by dependency there, not by phase).
 
 ---
 
 ## START HERE — next session
 
-**Done this session:** T3 (payload fine-tune, 33M steps) and T4 (gate + ablation) are COMPLETE.
-T0 is all but settled. 2 of 13 tasks done, both locomotion.
+**Done in session 3:** T1 (grasp) closed, T0.3 answered (with the T0.4 decision), and T2 mostly
+built: the second table, the place skill, the shared success spec, and the language templates.
+Session 2 had already finished T3/T4 (locomotion).
 
-**Two decisions taken 2026-09-18, do not relitigate:**
-1. **Screwdriver dropped from the grasp set** (`GRASP_TOOLS` in `bw/sim/workshop.py`). It stays
-   in the scene as a distractor for the grounding model. Four hypotheses refuted, 0/8
-   throughout; the rack jam is the untested explanation and the fixture is a poor one.
-   Benchmark is now **69%** over 4 tools (was 57% over 5).
-2. **Qwen3-VL-2B is the Layer-1 grounding model** (`~/bringwrench/models/qwen3-vl-2b`, 4.0 GB).
-   Both Molmo2 mirrors are dead (Known bug #6). Qwen needs NO `trust_remote_code` — it is built
-   into transformers 5.5.4 — loads in bf16, and emits TEXT coordinates at ~1.2 s per call.
+**Current numbers (5 tools, 25 seeds each, `try_grasp.py 25` / `try_place.py 25 --table X`):**
+
+| | wrench_10mm | wrench_13mm | screwdriver | pliers | tape_roll | overall |
+|---|---|---|---|---|---|---|
+| **grasp**, held 4 s | 25/25 | 23/25 | 25/25 | 25/25 | **21/25** | **119/125 (95%)** |
+| **transfer → table B** | 23/25 | **13/25** | 24/25 | 21/25 | **16/25** | **97/125 (78%)** |
+| **transfer → table A** | 24/25 | **13/25** | 24/25 | 19/25 | 20/25 | **100/125 (80%)** |
+
+The grasp passes the overall bar, but tape_roll (84%) is under the 90% per-tool bar at the
+stricter 4 s hold. Transfer is **below T2.3's 90% bar**. 42 of its 53 failures are
+`outside_zone`, and wrench_13mm alone accounts for 24: it is the longest tool, and it topples
+furthest after release. The tape roll's transfer fell from 21/25 to 16/25 on table B after the
+servo-ramp change and has not been diagnosed yet.
+
+**Decisions taken in session 3, do not relitigate:**
+1. **Grasp success is scored after a 4 s static hold** (`HOLD_VERIFY`). Scoring at the end of
+   the motion inflated everything: 69% read as 31% once the tool had to stay put for 2 s. 2 s
+   was still too lenient, because the pliers passed it and dropped at ~2.3 s.
+2. **CPU scene: `timestep 0.001`, `cone="pyramidal"`.** This fixed the pad-contact creep, where
+   the pad time constant was exactly 1× the timestep (see "THE CREEP"). `impratio`,
+   `noslip_iterations` and a 0.5 ms timestep were all tried and do not help further.
+3. **The servo target ramps across each 10 Hz tick** (`RAMP_CHUNK`, `WorkshopSim.move_arm`).
+   A stepped target made the arm stop dead 10 times a second; on video that is the robot
+   "vibrating". Joint-speed peak/mean went from 4.2× to 1.05×. The recorded action is unchanged.
+4. **The screwdriver stands HANDLE-DOWN and is a grasp tool again.** Shaft-down, it fell over on
+   its own in 9/40 untouched scenes. Handle-down it never falls, and it grasps 12/12 on the
+   handle (`GRASP_Z` 0.064).
+5. **Layer 1 = Qwen3-VL-2B, with size mapped to grip-band colour.** It is at CHANCE on 10 mm
+   vs 13 mm by size and 92.9% by colour (T0.3 section below). This is a stated limitation.
+6. **Two tables:** A = the workbench with the rack (left / far), B = the side table (right /
+   near). Each has a painted green place zone. `PLACE_ZONE` / `PLACE_STATION` in
+   `bw/sim/workshop.py`, measured by `scripts/reach_audit.py` and the `--back` sweep.
+7. **Base moves between stations with `WorkshopSim.teleport_base`**, a rigid kinematic stand-in
+   for Layer 3 walking. The clips caption it as such. Wiring the real policy in is T5 → T9.
 
 **Next tasks, in order:**
 
 | # | task | why now |
 |---|---|---|
-| **T0.3 finish** | Confirm Qwen's coordinate SCALE and score accuracy vs sim ground truth | It replied `(800, 455)` and `(844, 500)` on a **512x512** image — that is Qwen's **0-1000 normalised** convention, NOT pixels. Convert `x_px = x/1000*W` and VERIFY. Also 1 of 5 replies refused ("There are none." for pliers) — check whether the tool was actually in the wrist view before blaming the model. `scripts/test_qwen_point.py` is the harness. |
-| **T1** | Grasp 69% -> >=90% per tool | **`dropped` is now 8 of 10 failures** (wrench_13mm 3, pliers 4, wrench_10mm 1). One failure mode, one place to look: the tool leaves the jaws during the lift/retreat. This is the critical path — it blocks T2 -> T6 -> T7 (the SmolVLA fine-tune, the centrepiece). |
-| **T5** | Validate `controller.py` against MJX | Small, self-contained, blocks T9, and independent of T1. Verify the observation bit-for-bit against `Go2ArmEnv._single_obs` — note the actor reads the **255-dim `privileged_state`** (see decision 6). |
-| **T8** | `locate()` behind `vlm.point()` | Unblocked as soon as T0.3 closes. |
+| **T2.3 finish** | Transfer ≥90% per tool | The dominant failure is `outside_zone`: the tool is released hanging and TOPPLES as it lands, and long tools (wrench_13mm) travel furthest. Refuted so far: aim jitter (moves the median, not the tail) and releasing laid flat (worse, 58 mm median). Untried: lower the release so the topple starts from contact rather than a drop, tip the tool over with the gripper still closed, or aim the release so the topple direction points INTO the zone (it is predictable from the lean). |
+| **T6** | Data collection | Blocked on T2.3. `bw/task/spec.py` and `bw/task/language.py` are ready for it; `run_grasp`/`run_place` take `record` and `on_phase` callbacks. |
+| **T5** | Validate `controller.py` against MJX | Small, self-contained, blocks T9. |
+| **T8** | `locate()` behind `vlm.point()` | T0.4 decided. Must use 2–3 views: the target is occluded in 27.5% of scan-pose views. |
+
+**Clips:** `media/transfer_screwdriver_table_b.mp4` (the current one: both tables, command +
+live action, no vibration), `media/transfer_wrench_10mm_table_b.mp4` (made before the vibration
+fix), `media/grasp_*.mp4`. Render with `scripts/make_transfer_video.py TOOL TABLE SEED`.
 
 **Unfinished business worth knowing:**
-- `media/loco_payload.npz` was dumped but **never rendered** — run `scripts/render_traj.py` on
-  Windows for the money shot (the policy crossing the step with the arm extended).
-- The push-ablation anomaly (original stowed 160 N < extended 200 N) is REPRODUCIBLE and
-  unexplained. **Do not publish that table until it is.**
-- `QACC` NaN warnings still appear in CPU grasp runs. They are NOT independent of the jaw
-  pads after all: raising `impratio` to 50-100 makes them much more frequent, and that is the
-  same conditioning problem as the creep. Worth re-checking now that the timestep is halved.
-- The GPU clock cap (`nvidia-smi -lgc 300,1100`, Administrator) does NOT survive a driver
-  re-init and lapsed mid-run once. `nvidia-smi -rgc` to release it. `ops/thermal_guard.sh`
-  stops training at 88 C as a backstop.
+- The pad creep is 36× smaller but NOT zero: ~7 mm/s during lift and retreat on the 13 mm
+  wrench. Tools usually survive because their head catches on the pads. It is the root of the
+  remaining grasp drops.
+- `media/loco_payload.npz` was dumped but never rendered (`scripts/render_traj.py`, Windows).
+- The push-ablation anomaly (original stowed 160 N < extended 200 N) is reproducible and
+  unexplained. Do not publish that table until it is.
+- The GPU clock cap (`nvidia-smi -lgc 300,1100`, Administrator) does not survive a driver
+  re-init. `nvidia-smi -rgc` releases it; `ops/thermal_guard.sh` stops training at 88 °C.
 
 Plan of record: `bring-me-the-10mm-wrench-plan (1).md`. Upstream locomotion project:
-`D:\hexapod` on Windows, `~/go2-stairs` in WSL (its `HANDOFF.md` and `plan.md` still apply to
-everything about the locomotion policy).
+`D:\hexapod` on Windows, `~/go2-stairs` in WSL.
 
 ---
 

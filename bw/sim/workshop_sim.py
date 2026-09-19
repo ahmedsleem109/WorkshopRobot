@@ -34,6 +34,7 @@ ARM_J_QPOS = slice(19, 25)           # the six arm joints
 FING_A, FING_B = 25, 26              # parallel-jaw finger slides (B mirrors A by equality)
 # Parallel jaw: the command is finger travel in metres. 0 = closed (squeezing), 0.038 = open.
 GRIPPER_OPEN, GRIPPER_CLOSED = 0.038, -0.008      # closed commands 8 mm past contact
+RAMP_CHUNK = 10                  # physics steps per servo-target increment inside a 10 Hz tick
 
 
 @dataclass
@@ -282,12 +283,24 @@ class WorkshopSim:
         q0 = self.arm_target.copy()
         steps = max(1, int(round(duration * rate_hz)))
         sub = int(round(1.0 / (rate_hz * self.m.opt.timestep)))
+        chunk = max(1, min(RAMP_CHUNK, sub))
         for k in range(1, steps + 1):
             q = q0 + (q_goal - q0) * (k / steps)
             if record is not None:
                 record(q)
-            self.set_arm_target(q)
-            self.physics_step(sub)
+            # RAMP the servo target across the tick (first-order hold), do not step it. With a
+            # stepped target the stiff arm servos lurched to each 10 Hz command and came to a
+            # complete stop before the next one -- measured, joint speed peaked at 4.2x its
+            # mean every tick and hit exactly zero at every tick's end: a 10 Hz start-stop
+            # stutter that reads as the robot vibrating on video. The recorded action is
+            # unchanged; it is where the arm should be at the END of the tick.
+            q_prev = self.arm_target.copy()
+            done = 0
+            while done < sub:
+                n = min(chunk, sub - done)
+                done += n
+                self.set_arm_target(q_prev + (q - q_prev) * (done / sub))
+                self.physics_step(n)
 
     def arm_q(self) -> np.ndarray:
         """Six arm joints plus the finger travel -- the 7-vector the VLA acts in."""

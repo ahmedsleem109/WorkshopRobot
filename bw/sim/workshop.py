@@ -147,23 +147,15 @@ TOOLS = (
 )
 TOOL_NAMES = tuple(t.name for t in TOOLS)
 
-# Tools the demonstrator is expected to GRASP. The screwdriver stays in the scene -- it is a
-# useful distractor for the grounding model, which must not fetch the wrong tool -- but it is
-# not a grasp target.
+# Tools the demonstrator is expected to GRASP: all five again (2026-09-19).
 #
-# DECISION 2026-09-18, after four refuted hypotheses and 0/8 across every configuration tried:
-#   (a) jaws closing on the rack plates       -- refuted, pads contact the handle at 26-33 N
-#   (b) grasp height x squeeze depth          -- refuted, 0/8 across all six combinations
-#   (c) pad contact stiffness                 -- refuted, made every tool worse
-#   (d) corner grip from handle roll          -- REAL (27.6 deg mean roll at closure, jaw gap
-#       34-44 mm on a 25 mm handle) and FIXED by making the handle a cylinder (gap -> 24.7 mm),
-#       but success did not move: still 0/8.
-# What the traces show and nothing has yet addressed: the tool is JAMMED in its slot. Closing
-# pins it against rack_front at 28 N, its shaft needs 57 mm of lift to clear the plates, and
-# the pads lose it at 49 mm. A 90 mm round shaft standing in a 30 mm slot is a poor fixture,
-# and saying so is a legitimate finding. Revisit by widening the slot for this tool, or by
-# laying it down, if a fifth tool is wanted later.
-GRASP_TOOLS = tuple(n for n in TOOL_NAMES if n != "screwdriver")
+# The screwdriver was dropped on 2026-09-18 after 0/8 across four refuted hypotheses, with
+# the diagnosis that a 90 mm round shaft standing DOWN in a 30 mm slot is a poor fixture
+# (pinned against rack_front, needed 57 mm of lift, lost at 49 mm). Standing it HANDLE-DOWN
+# instead -- done first because shaft-down it fell over on its own in 9/40 scenes -- removes
+# that fixture entirely, and it is graspable on the handle, next to its centre of mass:
+# 12/12 at GRASP_Z 0.060, 0.064 and 0.068 (0.095 on the shaft also 12/12; 0.120 drops 12/12).
+GRASP_TOOLS = TOOL_NAMES
 TOOL_BY_NAME = {t.name: t for t in TOOLS}
 
 
@@ -243,7 +235,7 @@ STAND_QUAT_PLIERS = (-0.5, -0.5, -0.5, 0.5)
 #     GRASP_Z 0.130 -> grasp fails outright, 0/8
 # This is T1.4's hypothesis (d), which had never been tested. It also shrinks the offset the
 # place skill has to stand off from, which is what put the zone out of the arm's reach.
-GRASP_Z = {"wrench_10mm": 0.088, "wrench_13mm": 0.105, "screwdriver": 0.128,
+GRASP_Z = {"wrench_10mm": 0.088, "wrench_13mm": 0.105, "screwdriver": 0.064,
            "pliers": 0.080, "tape_roll": 0.0467}
 
 

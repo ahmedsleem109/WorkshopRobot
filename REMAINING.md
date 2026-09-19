@@ -187,23 +187,30 @@ re-run the 100-episode benchmark.
 Language-commanded *transfer*: "put the 10mm wrench on the right table", "move the pliers to
 the far bench". The VLA must execute both halves, so the demonstrations must contain both.
 
-- [ ] **T2.1 Scene.** Add a second table (table B) to `bw/sim/workshop.py`: same 75 cm height,
+- [x] **T2.1 DONE (session 3).** Table B off the walkway's right edge, painted zones on both
+      tables, cameras `table_b_view` + `scene_wide`; names agree in both schemes (A = left/far,
+      B = right/near). Original: **T2.1 Scene.** Add a second table (table B) to `bw/sim/workshop.py`: same 75 cm height,
       placed so both tables are reachable from a standing pose after a short base move, with a
       marked **place zone** on each (a shallow tray or a painted rectangle) plus a slot rack on
       table A only. Name the tables in world terms the language can refer to ("left"/"right"
       from the robot's start pose, and "near"/"far"). Keep the 12 cm step on the route.
-- [ ] **T2.2 Reachability audit.** Re-run the reach search (`scripts/find_scan_pose.py` pattern)
+- [x] **T2.2 DONE (session 3).** `scripts/reach_audit.py`: the place roll must be about the
+      APPROACH axis (joint 6, free); about the jaw axis is unreachable past ~45 deg. Stations
+      0.48 m behind each zone, from a `try_place.py --back` sweep. Original: **T2.2 Reachability audit.** Re-run the reach search (`scripts/find_scan_pose.py` pattern)
       for both tables and record which base poses serve which table; the orchestrator needs
       those as navigation goals.
-- [ ] **T2.3 `place` skill** in `bw/manip/scripted_place.py`: approach above the place zone,
+- [ ] **T2.3 BUILT, below the bar (session 3):** see the STATUS.md header for numbers; the
+      dominant failure is the tool toppling out of the zone after release. Original: **T2.3 `place` skill** in `bw/manip/scripted_place.py`: approach above the place zone,
       descend to contact (or a fixed clearance), open the jaws, retract, verify the tool is
       resting in the zone and the gripper is empty. Acceptance: **≥90%** placement success for
       each tool on 100 episodes, tool inside the zone and stable for 2 s.
-- [ ] **T2.4 Task spec + success criteria** for transfer: correct object, correct destination
+- [x] **T2.4 DONE (session 3).** `bw/task/spec.py` (`Task`, `Snapshot`, `evaluate`), already
+      used by `try_place.py`. Original: **T2.4 Task spec + success criteria** for transfer: correct object, correct destination
       table, tool stable and inside the zone, nothing else knocked off. Encode it as one
       function both the data collector and the evaluator call, so training and scoring cannot
       drift apart.
-- [ ] **T2.5 Language templates** for transfer commands (destination phrased as left/right,
+- [x] **T2.5 DONE (session 3).** `bw/task/language.py`: template x synonym x table alias,
+      `check_diversity` guard (242 distinct strings / 300 draws). Original: **T2.5 Language templates** for transfer commands (destination phrased as left/right,
       near/far, and "the other table"), with paraphrases generated the same way as the pick
       instructions (T6.2).
 
@@ -378,4 +385,8 @@ Keep 1, 2 and 4 if time is short (the plan's own cut line):
 | session 3 | staging waypoint above the pre-grasp (the scan->pre-grasp swing swept the rack) | 92/100 -> 97/100 |
 | session 3 | `settle_static` (velocity threshold) replaces the fixed 1.2 s settle | (same run) |
 | session 3 | **100-episode benchmark** | **97/100** (96/100/96/96 per tool) -- **T1 acceptance met** |
+| session 3 | pliers GRASP_Z 0.112 -> 0.080 (grip-to-centre 92 -> 53 mm) | pliers held-5s 0/8 -> 8/8 |
+| session 3 | HOLD_VERIFY 2 -> 4 s (2 s hid a drop at ~2.3 s) | 95/100 at 4 s (4 tools) |
+| session 3 | screwdriver stands handle-down; back in GRASP_TOOLS, GRASP_Z 0.064 | spontaneous falls 9/40 -> 0/40; screwdriver 0/8 -> 12/12 |
+| session 3 | servo target ramped across each 10 Hz tick (the "vibration") | see STATUS header |
 | session 1 | grounding model: 4-bit pointing model (3.7 GB) chosen over Molmo2-ER (19.4 GB F32) | see T0 |
