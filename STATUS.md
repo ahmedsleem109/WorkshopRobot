@@ -1,6 +1,6 @@
 # STATUS — "Bring me the 10mm wrench"
 
-Last updated **2026-09-19, end of session 3**. Read this, then `REMAINING.md` for what to do
+Last updated **2026-09-19, session 4** (see "SESSION 4" right below the task board). Read this, then `REMAINING.md` for what to do
 next (tasks are ordered by dependency there, not by phase).
 
 ---
@@ -46,6 +46,53 @@ of session 3 (2026-09-19).
 
 **Critical path:** T2.3 → T6 → T7 → T9 → T10 → T11 → T12. T5 and T8 can run in parallel with
 it and must both be done before T9.
+
+---
+
+## SESSION 4 (2026-09-19) — the base WALKS between tables; T2.3 at 95-96%
+
+**Why:** the transfer clip's base move was `teleport_base`, a kinematic slide with frozen legs.
+That is replaced: the Layer 3 policy now owns the legs for the whole episode, and
+`bw/locomotion/navigate.walk_to()` drives it with velocity commands only.
+
+**What it took (each measured):**
+1. `controller.py` ran the policy with **ReLU; brax trains SWISH**. 0.19 m -> 1.70 m in 3 s at
+   vx 0.5; MJX gives 1.76 m. T5's sim-to-sim check is effectively done (`scripts/nav_tracking.py`).
+2. The 33M payload policy **only walks forward >= 0.2 m/s**: pure turn, back-up, sidestep and
+   slow all STAND (CPU and MJX agree). The reward made standing optimal. Nav fine-tune
+   (`configs/payload_nav.yaml`, header has the history):
+   run 1 sigma 0.25 -> nothing learned in 5M; run 2 sigma 0.1 -> turn R (4M) then turn L (7M);
+   run 3 back-up weighted 35% -> **back -0.16/-0.25, side +0.14/-0.10 at 1.8M**. Run 3 is still
+   TRAINING (8M total, ~2.5 h from 16:27): `~/bringwrench/runs/results/*payload_nav3`.
+   Export: `JAX_PLATFORMS=cpu ... export_policy <ckpt> models/X.npz` (CPU, or it grabs GPU memory).
+   `models/nav3_b.npz` = run 3 @ 1.8M, the one everything below used.
+3. Left turns can also be MIRRORED (`Locomotion.mirror_when`): the Go2 is symmetric and the
+   policy does not see the arm.
+4. Station B's front feet were **16 cm past the walkway edge** (hidden by pinned legs): walkway
+   now runs to the bench (x 4.45) + `WALKWAY_SPUR_B` under station B. Table heights unchanged.
+5. Navigator shaped to the policy: deadband (turns >= 0.45 rad/s, 0.25 m/s creep), in-place
+   turns DRIFT ~3.5 cm/s (big turn at a far waypoint; at the rack the drift pinned the robot
+   against the bench -> must BACK UP first), lateral error fixed by sidestep, not arcs.
+
+**Walking transfer (`try_place.py 5 --table X --walk models/nav3_b.npz`):**
+| | walks reaching station | full transfer | failures |
+|---|---|---|---|
+| table B | 20/22 (median 17 mm / 4.0 deg, 19 s) | **20/25** | tape grasp 3, walk timeout 1, walk fell 1 |
+| table A | 22/22 (median 31 mm / 4.9 deg, 19 s) | **17/25** | outside_zone 4, tape grasp 3, drop 1 |
+
+**T2.3 (teleported base, `try_place.py 25`): table B 78% -> 96%, table A 80% -> 95%.**
+- The topple after release has a direction: aim `PLACE_AIM_SHIFT` 45 mm past centre, re-aimed
+  from the tool's measured lean before descent (`scripts/topple_diagnose.py`).
+- Grip force PER TOOL (`GRIP_FORCE`, `GRIP_KP` 4000): 20 N lets the 13 mm wrench creep out
+  (55 mm/s), 60 N extrudes the 10 mm wrench and wedges the tape roll out.
+- Grasp 119/125; every tool >= 96% except **tape_roll (grasp 21/25; transfer 22/25 B, 20/25 A)**:
+  its failures start with the ring pinched against a rack plate at 75-120 N when the jaws close.
+
+**Next, in order:** (a) take run 3's final checkpoint, re-run `nav_tracking.py` + the walking
+benchmark at 25 seeds; (b) placing on legs loses 4/25 outside the zone on table A -- station
+error (31 mm) + standing sway; (c) tape roll: the close pinches it against the plate; (d) the
+tape on legs is worse (3/5 grasp failures) -- base drifts ~40 mm when it is pulled.
+Clip: `media/transfer_screwdriver_table_b.mp4` (walking, SUCCESS).
 
 ---
 
