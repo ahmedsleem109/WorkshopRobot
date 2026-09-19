@@ -34,6 +34,13 @@ GRASP_HALF_WIDTH = {"wrench_10mm": 0.0065, "wrench_13mm": 0.008, "screwdriver": 
 #     tool squirts out and the jaws slam shut (3/25 in transit) -- and the tape roll's curved
 #     rim wedges out of the jaws (transfer 21/25 -> 13/25).
 # A real gripper is run the same way (force per object), and the command is in the action.
+# Lift duration per tool (s). The tape roll is held at a point on its rim, so lifting swings
+# it ~90 deg in the jaws to hang below that point; fast, the swing jams the ring against the
+# rack plates (scripts/grasp_diagnose.py: failures show 120-790 N of rack contact). Slower:
+# grasp 19/25 -> 21/25. What is left is NOT the lift: all 4 remaining failures start with the
+# ring already pinched against a plate at 75-120 N when the jaws close; every grasp that starts
+# under 12 N succeeds. Next fix is in the approach/close, not here.
+LIFT_S = {"tape_roll": (2.5, 3.0)}
 GRIP_FORCE = {"wrench_10mm": 20.0, "wrench_13mm": 60.0, "screwdriver": 60.0,
               "pliers": 60.0, "tape_roll": 18.0}
 
@@ -211,7 +218,7 @@ def run_grasp(sim: WorkshopSim, ik: ArmIK, name: str, rng: np.random.Generator,
     diag["grip_q"] = round(float(sim.arm_q()[6]), 4)
     ph("lift")
     q = cartesian(sim, ik, q, site, site + np.array([0, 0, LIFT]), Rg, closed,
-                  rng.uniform(1.2, 1.6), record)
+                  rng.uniform(*LIFT_S.get(name, (1.2, 1.6))), record)
     ph("lift_settle")
     sim.move_arm(arm7(q, closed), 0.4, record)      # settle before translating
     diag["lift_only"] = round(float(sim.gt_tool_pos(name)[2] - z0), 3)

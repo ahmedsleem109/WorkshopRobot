@@ -33,6 +33,7 @@ TOOL = sys.argv[1] if len(sys.argv) > 1 else "wrench_10mm"
 TABLE = sys.argv[2] if len(sys.argv) > 2 else "table_b"
 SEED = int(sys.argv[3]) if len(sys.argv) > 3 else 0
 POLICY = sys.argv[4] if len(sys.argv) > 4 else str(ROOT / "models/payload_nav_policy.npz")
+BACKUP_M = float(sys.argv[5]) if len(sys.argv) > 5 else 0.40    # 0 = policy cannot back up yet
 W, H, IW = 1280, 720, 300
 FPS = 25
 FONT = ImageFont.truetype("C:/Windows/Fonts/segoeui.ttf", 26)
@@ -137,7 +138,7 @@ if g["success"]:
     # every physics step still goes through `stepped`, so it is filmed like the arm work.
     state["cam"] = "scene_wide"
     state["stage"] = "WALK"
-    w = walk_to(sim, PLACE_STATION[TABLE], on_phase=lambda l: phase("to " + TABLE.replace("_", " ") + ": " + l))
+    w = walk_to(sim, PLACE_STATION[TABLE], backup=BACKUP_M, on_phase=lambda l: phase("to " + TABLE.replace("_", " ") + ": " + l))
     print("walk:", w)
     state["cam"] = None
     if not w["success"]:
