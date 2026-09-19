@@ -5,6 +5,50 @@ next (tasks are ordered by dependency there, not by phase).
 
 ---
 
+## TASK BOARD — read this first
+
+Task IDs are those in `REMAINING.md`, which holds the full sub-task lists. Status as of the end
+of session 3 (2026-09-19).
+
+### DONE
+| task | what it delivered | evidence |
+|---|---|---|
+| **T0.1/T0.2** grounding candidates | Molmo2 mirrors dead (points are special tokens, no loader); Qwen3-VL-2B chosen | Known bug #6 |
+| **T0.3** grounding bake-off | 0-1000 normalised coords; 1.12 s/call; **chance on 10 vs 13 mm by size, 92.9% by colour band** | "T0.3 ANSWERED" section |
+| **T1** grasp demonstrator | 5 tools, **119/125 (95%) held for 4 s**; the creep, tape grasp point, staging waypoint, settle-to-static, pliers grip height | "Scripted grasp demonstrator", "THE CREEP" |
+| **T2.1** second table | table B + painted zones on both tables; A = left/far, B = right/near | `bw/sim/workshop.py` (TABLE_B_*, PLACE_ZONE) |
+| **T2.2** reach audit | roll about the approach axis (joint 6); stations 0.48 m behind each zone | `scripts/reach_audit.py` |
+| **T2.4** success spec | one `evaluate()` for collector + evaluator | `bw/task/spec.py` |
+| **T2.5** language | paraphrased pick/transfer commands + diversity guard | `bw/task/language.py` |
+| **T3** payload locomotion fine-tune | 33M steps, attitude terminations 0.20 → 0.05 | "Phase 1 gate + ablation" |
+| **T4** Phase 1 gate + ablation | gate 2 FAILS at 12 cm (19/20); height sweep is the publishable result | "Step-height sweep" |
+| sim fixes | 10 Hz servo stutter ("vibration") removed; screwdriver stands handle-down and is graspable | session-3 decisions 3-4 below |
+
+### IN PROGRESS / BELOW THE BAR
+| task | state | next action |
+|---|---|---|
+| **T2.3** place skill | built; transfer **78% (table B) / 80% (table A)** vs the 90% bar. wrench_13mm 13/25; tape to table B 16/25 | fix tools toppling out of the zone: see the START HERE table |
+| **T1** tape_roll per-tool | 21/25 at the 4 s hold (84%) | diagnose with `scripts/grasp_diagnose.py 25 --tool tape_roll` |
+| **T0.4** `vlm.point()` | decided (Qwen + size→colour lookup), **not implemented** | separate process, one-function contract |
+| **T3.5** curriculum L5 run | `payload_l5` (level_init 5) **stopped at 4.59M of 10M steps, never evaluated** (`~/bringwrench/runs/results/2026-09-18_12-19-23-payload_l5`) | resume or re-launch via Scheduled Task, then re-run the height sweep |
+
+### NOT STARTED (dependency order)
+| task | blocked by |
+|---|---|
+| **T5** validate `controller.py` against MJX + `base_mode="policy"` | nothing -- can start now |
+| **T6** demonstration data (LeRobot v2.0) | T2.3 at ≥90% |
+| **T7** SmolVLA fine-tune (the centrepiece) | T6 |
+| **T8** `locate()` (point → depth → 3D, 2-3 views) | T0.4 |
+| **T9** orchestrator (nav / pick / place / recover) | T5, T7, T8 |
+| **T10** recovery scenarios | T9 |
+| **T11** 50-trial evaluation suite | T9, T10 |
+| **T12** video, README, blog, outreach | T11 |
+
+**Critical path:** T2.3 → T6 → T7 → T9 → T10 → T11 → T12. T5 and T8 can run in parallel with
+it and must both be done before T9.
+
+---
+
 ## START HERE — next session
 
 **Done in session 3:** T1 (grasp) closed, T0.3 answered (with the T0.4 decision), and T2 mostly

@@ -12,6 +12,10 @@ Standing rules for next session:
 - New scope this session: **pick from one table and place on another, commanded in language at
   run time, executed by the VLA** (T2, then T6/T7/T9).
 
+
+> **Session 3 (2026-09-19):** the per-task DONE / IN PROGRESS / NOT STARTED board is at the top of
+> `STATUS.md`. Some checkboxes below (T3, T4) were finished in session 2 and never ticked; the
+> board is authoritative.
 ---
 
 ## Dependency graph
