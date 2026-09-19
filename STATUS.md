@@ -1,6 +1,6 @@
 # STATUS — "Bring me the 10mm wrench"
 
-Last updated **2026-09-19, session 4** (see "SESSION 4" right below the task board). Read this, then `REMAINING.md` for what to do
+Last updated **2026-09-19, end of session 4**. Start with "NEXT SESSION (5)" below the task board. Read this, then `REMAINING.md` for what to do
 next (tasks are ordered by dependency there, not by phase).
 
 ---
@@ -46,6 +46,42 @@ of session 3 (2026-09-19).
 
 **Critical path:** T2.3 → T6 → T7 → T9 → T10 → T11 → T12. T5 and T8 can run in parallel with
 it and must both be done before T9.
+
+---
+
+## NEXT SESSION (5) -- execute in this order
+
+Context: walking is solved (214/214 walks, `models/payload_nav_policy.npz`). The pipeline now
+runs with the legs ON THE POLICY (`WorkshopSim.attach_locomotion`), and that is the mode the
+remaining arm work and the data collection must be measured in (`try_place.py 25 --walk`).
+
+1. **Tape roll grasp on legs** (8/25 on legs, 21/25 pinned). Diagnose with
+   `grasp_diagnose.py` on a policy-attached sim: base drift during lift (~27 mm) + the ring
+   pinched against a rack plate at close (75-120 N in every failure). Candidate fixes: close
+   with less lateral preload / re-point after the jaws touch; lift-with-retreat. Bar: >=90%.
+2. **Place on legs** -- pliers 19-20/25 outside_zone (24-25/25 pinned), screwdriver 3/25 on A.
+   Measure the base sway during descend/release; re-run `_servo_xy` right before release;
+   consider a longer settle. Bar: every tool >=90% with `--walk`.
+3. **Re-benchmark** `try_grasp.py 25` (pinned) and `try_place.py 25 --walk` on both tables.
+   T2.3 is DONE when every tool is >=90% on legs. Render one clip per table and send it.
+4. **T5 formal check** (small): MJX vs CPU obs/action element-wise for 100 steps
+   (`controller.py`); the functional check is already done (`nav_tracking.py`).
+5. **T0.4 `vlm.point()`** (can run in parallel with 1-3 -- no sim changes): Qwen3-VL-2B,
+   separate process, size -> grip-band colour lookup, `None` when not found.
+6. **T8 `locate()`**: point -> wrist depth -> base frame, 2-3 scan views merged; score median
+   error + miss rate vs ground truth.
+7. **T6 data collection** (needs 3): ~600 pick + ~600 transfer, legs on the policy, paraphrased
+   instructions (`bw/task/language.py`), successes only (`bw/task/spec.py`) -> LeRobot v2.0.
+8. **T7 SmolVLA fine-tune** (needs 7): pick-only baseline -> full run (Kaggle / local LoRA);
+   fixed eval protocol + language-swap test.
+9. **T9 orchestrator** (needs 4, 6, 8): `navigate_to` = `walk_to`, `locate`, `grasp`, `place`,
+   `stow_arm` (Cartesian; joint fold drops the tool), `ask_human`; state machine + gates.
+10. **T10 recovery** (1, 2, 4 first) -> **T11** 50-trial eval + failure table -> **T12** video,
+    README, blog, outreach.
+
+Loose ends, when convenient: T3.5 step-height run (stopped 4.6M, never evaluated); render
+`media/loco_payload.npz`; the push-ablation anomaly (do not publish that table until explained);
+the GPU clock cap lapses on driver re-init (guard at 88 C works).
 
 ---
 
