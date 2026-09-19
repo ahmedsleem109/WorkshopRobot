@@ -49,6 +49,15 @@ PLACE_ROLL = None
 # pad instead of the tool, and the drop is longer. Tools are released hanging and allowed
 # to topple.
 PLACE_JITTER = 0.020            # m: aim scatter inside the zone; swept, see plan_place
+# The topple is NOT random, it is a coin with two known faces. MEASURED 2026-09-19
+# (scripts/topple_diagnose.py, table B, 12 seeds per tool, distance along the approach axis,
+# + = away from the robot): a released tool either stays standing (~0 mm) or topples BACK
+# TOWARD THE ROBOT -- wrench_13mm median -95 mm (almost always falls), wrench_10mm /
+# screwdriver / tape_roll 0 mm or -75..-98 mm, pliers 0 mm; every topple had the same sign,
+# and the tool's lean at release predicted it (cos = +1.00 on the 13 mm wrench). Aimed at
+# the centre, a 95 mm topple leaves 5 mm of a 100 mm half-zone: that was 24 of the 53
+# transfer failures. Shifting the aim by about half the topple centres BOTH outcomes.
+PLACE_AIM_SHIFT = 0.045         # m, along the approach axis, away from the robot
 PLACE_CLEAR = 0.004             # m: tool's lowest point above the table at release
 PLACE_LIFT = 0.16               # m: height of the pre-place waypoint above the release pose
 PLACE_RETRACT = 0.12            # m: up, AFTER backing off (see run_place)
@@ -158,13 +167,16 @@ def release_pose(sim: WorkshopSim, name: str, target_xy, R_place: np.ndarray):
 def plan_place(sim: WorkshopSim, ik: ArmIK, name: str, table: str, rng):
     """Gripper pose that leaves `name` resting inside `table`'s zone."""
     zx, zy = PLACE_ZONE[table]
+    sh = sim.d.xpos[sim.m.body("arm_link02").id]
     # Aim near the centre, not anywhere in the zone. A tool released standing TOPPLES as it
     # lands and travels while doing so, so the aim point and the topple share one error
     # budget; spending half of it on variety is what put ~20% of placements over the line.
-    tx = zx + rng.uniform(-PLACE_JITTER, PLACE_JITTER)
-    ty = zy + rng.uniform(-PLACE_JITTER, PLACE_JITTER)
+    # ... and aim PLACE_AIM_SHIFT PAST the centre, away from the robot: the topple has a
+    # direction (see PLACE_AIM_SHIFT).
+    h0 = np.arctan2(zy - sh[1], zx - sh[0])
+    tx = zx + PLACE_AIM_SHIFT * np.cos(h0) + rng.uniform(-PLACE_JITTER, PLACE_JITTER)
+    ty = zy + PLACE_AIM_SHIFT * np.sin(h0) + rng.uniform(-PLACE_JITTER, PLACE_JITTER)
 
-    sh = sim.d.xpos[sim.m.body("arm_link02").id]
     heading = np.arctan2(ty - sh[1], tx - sh[0])
     a = np.array([np.cos(heading), np.sin(heading), 0.0])      # horizontal approach
     lateral = np.array([-np.sin(heading), np.cos(heading), 0.0])
