@@ -74,11 +74,18 @@ That is replaced: the Layer 3 policy now owns the legs for the whole episode, an
    turns DRIFT ~3.5 cm/s (big turn at a far waypoint; at the rack the drift pinned the robot
    against the bench -> must BACK UP first), lateral error fixed by sidestep, not arcs.
 
-**Walking transfer (`try_place.py 5 --table X --walk models/nav3_b.npz`):**
+**Walking transfer, FINAL (`try_place.py 25 --table X --walk`, default policy =
+`models/payload_nav_policy.npz` = run 3 final @ 8.1M; back -0.25/-0.25, turns +-0.63, side
++0.18/-0.14):**
 | | walks reaching station | full transfer | failures |
 |---|---|---|---|
-| table B | 20/22 (median 17 mm / 4.0 deg, 19 s) | **20/25** | tape grasp 3, walk timeout 1, walk fell 1 |
-| table A | 22/22 (median 31 mm / 4.9 deg, 19 s) | **17/25** | outside_zone 4, tape grasp 3, drop 1 |
+| table B | **107/107** (median 19 mm / 8.5 deg, 16.5 s) | 100/125 (80%) | tape grasp 17, outside_zone 6 (pliers 5), drop 1, grasp 1 |
+| table A | **107/107** (median 28 mm / 5.6 deg, 16.0 s) | 93/125 (74%) | tape grasp 17, outside_zone 11 (pliers 6, screwdriver 3), not_settled 2, drop 1 |
+Walking itself is solved (214/214, no falls). Excluding the tape roll: 93/100 (B), 88/100 (A).
+The navigator needed (all measured, all in navigate.py): stall kick (the policy slips into its
+stand state mid-creep and will not restart at 0.25 m/s), stop-then-correct fine alignment,
+yaw trimmed FIRST only (a yaw trim slides the base ~10 cm sideways, or toward the bench).
+Earlier numbers with the 1.8M checkpoint: B 20/25, A 17/25 (5 seeds).
 
 **T2.3 (teleported base, `try_place.py 25`): table B 78% -> 96%, table A 80% -> 95%.**
 - The topple after release has a direction: aim `PLACE_AIM_SHIFT` 45 mm past centre, re-aimed
@@ -88,10 +95,10 @@ That is replaced: the Layer 3 policy now owns the legs for the whole episode, an
 - Grasp 119/125; every tool >= 96% except **tape_roll (grasp 21/25; transfer 22/25 B, 20/25 A)**:
   its failures start with the ring pinched against a rack plate at 75-120 N when the jaws close.
 
-**Next, in order:** (a) take run 3's final checkpoint, re-run `nav_tracking.py` + the walking
-benchmark at 25 seeds; (b) placing on legs loses 4/25 outside the zone on table A -- station
-error (31 mm) + standing sway; (c) tape roll: the close pinches it against the plate; (d) the
-tape on legs is worse (3/5 grasp failures) -- base drifts ~40 mm when it is pulled.
+**Next, in order:** (a) TAPE ROLL grasp on legs: 8/25 -- the standing base drifts ~27 mm during
+the grasp (pinned: 21/25); the close already pinches the ring against a rack plate; (b) place on
+legs, pliers 19-20/25 outside_zone (pinned 24-25/25) -- standing sway during the release;
+(c) then T6 data collection runs in THIS mode (legs on the policy), not the pinned one.
 Clip: `media/transfer_screwdriver_table_b.mp4` (walking, SUCCESS).
 
 ---
