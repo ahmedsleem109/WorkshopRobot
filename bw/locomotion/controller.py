@@ -119,7 +119,7 @@ class Locomotion:
         self.n_substeps = int(round(0.02 / model.opt.timestep))
         self.dt = self.n_substeps * model.opt.timestep
         self.base = model.body("base").id
-        self.mirror_when = lambda cmd: cmd[2] > 0.05 and abs(cmd[0]) < 0.2 and abs(cmd[1]) < 0.1
+        self.mirror_when = lambda cmd: cmd[2] >= 0.3 and abs(cmd[0]) < 0.05 and abs(cmd[1]) < 0.05
         self.mirrored = False
         self.reset()
 

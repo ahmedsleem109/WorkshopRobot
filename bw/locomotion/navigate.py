@@ -31,6 +31,7 @@ TOL_POS, TOL_YAW = 0.03, np.radians(3.0)
 # 4 deg tolerance. So the navigator only ever asks for motion it will get: turns at >= W_MIN,
 # the final creep at a steady V_CREEP, and it stops on the mark instead of slowing into it.
 W_MIN, V_CREEP = 0.45, 0.25
+V_SIDE = 0.2             # m/s sidestep command (achieves ~0.10-0.14)
 FAR_EXTRA = 0.50         # m: the big-turn waypoint is this much further back than `pre`
 
 
@@ -140,12 +141,19 @@ def walk_to(sim, station, backup: float = BACKUP, on_phase=None, timeout_s: floa
             return float(d @ h), float(d @ n), _wrap(yaws - yaw)
 
         # STRAIGHT creep, no steering: at 0.25 m/s this policy's arcs slide sideways (a
-        # 0.5 rad/s arc measured -0.17 m/s of lateral slip), which left the first version 38 cm
-        # and 47 deg off. Pure forward tracks cleanly; heading is fixed by `align` before and
-        # `settle` after, lateral error is whatever `goto` left (< 6 cm).
-        ok = ok and run("approach", lambda: (V_CREEP, 0.0, 0.0),
-                        lambda: errs()[0] < 0.02 or abs(errs()[1]) > 0.12, 8.0)
-        ok = ok and abs(errs()[1]) <= 0.12
+        # 0.5 rad/s arc measured -0.17 m/s of lateral slip). Lateral error is corrected with a
+        # SIDESTEP instead, now that run 3 has one (+0.14 / -0.10 m/s at 1.8M steps): the
+        # arrival at `pre` can be up to ~20 cm off the line, and the first straight-only creep
+        # left 17-40 cm of it at the station.
+        def creep_cmd():
+            _, lat, _ = errs()
+            return (V_CREEP, float(np.clip(2.0 * lat, -V_SIDE, V_SIDE)), 0.0)
+
+        ok = ok and run("approach", creep_cmd,
+                        lambda: errs()[0] < 0.02 or abs(errs()[1]) > 0.30, 8.0)
+        ok = ok and run("side_trim",
+                        lambda: (0.0, float(np.sign(errs()[1]) * V_SIDE), 0.0),
+                        lambda: abs(errs()[1]) < 0.025, 6.0)
         ok = ok and run("settle_yaw", lambda: turn_cmd(lambda: yaws),
                         lambda: abs(_wrap(yaws - pose()[1])) < np.radians(5), 6.0)
 
