@@ -9,6 +9,10 @@ same library -- v3.0 is what this lerobot loads and trains on).
 
 Features: observation.images.camera1 = wrist, camera2 = mast (video, 256x256x3), observation.state (7: six arm
 joints + finger travel), action (7: the commanded target), task = the episode's instruction.
+
+With --delta the six ARM channels of `action` hold q_cmd - q_state (the one-step motion) instead
+of the absolute target; the gripper channel stays absolute. A dataset built that way MUST be
+served with `vla_server.py --delta`, which reports it on /health so the client cannot mismatch.
 Writes <root>/bw_episode_index.json mapping dataset episode index -> raw episode (kind, tool,
 table, seed), so a pick-only baseline (T7.1) can select `--dataset.episodes` from it.
 """
@@ -42,6 +46,9 @@ def main():
     ap.add_argument("--shard", default=None, help="i/N: convert every N-th episode from i")
     ap.add_argument("--merge", type=int, default=None,
                     help="merge <root>_s0..s{N-1} (from --shard runs) into <root>")
+    ap.add_argument("--delta", action="store_true",
+                    help="record the ARM action as a one-step delta (q_cmd - q_state) instead "
+                         "of the absolute target; the gripper channel stays absolute")
     args = ap.parse_args()
     if args.merge:
         return merge(args)
@@ -87,10 +94,26 @@ def main():
                   f"{ {c: len(v) for c, v in frames.items()} } frames", flush=True)
             continue
         for t in range(n):
+            act = np.asarray(arr["action"][t], np.float32).copy()
+            if args.delta:
+                # DELTA ARM ACTION (2026-09-20). Absolute joint targets make this task nearly
+                # unlearnable at this data scale: measured on the 1,128-episode absolute
+                # dataset, the demonstrator's per-step motion is ~0.026 rad while the action
+                # SPREAD the normaliser divides by is 0.28-0.68 rad per joint, so the quantity
+                # the model must resolve is 4-8% of its own normalised scale. The resulting
+                # policy predicted training actions to +-0.054 rad -- TWICE the size of the
+                # motion it had to produce, and worse than the trivial "hold the current joint
+                # position" predictor -- and scored grasp 1/20 (scripts/vla_replay_check.py).
+                # As a delta the target IS the motion, normalised to the motion's own scale.
+                #
+                # The GRIPPER stays absolute: its command is bimodal (open / closed), i.e.
+                # already large against its own spread, and it is the one channel the absolute
+                # policy beat the copy-state baseline on (0.0016 vs 0.0064 rad).
+                act[:6] = act[:6] - np.asarray(arr["state"][t], np.float32)[:6]
             ds.add_frame({KEY["wrist"]: frames["wrist"][t],
                           KEY["mast"]: frames["mast"][t],
                           "observation.state": arr["state"][t],
-                          "action": arr["action"][t],
+                          "action": act,
                           "task": meta["instruction"]})
         ds.save_episode()
         index.append({"episode": len(index), "raw": p.name, **{k2: meta[k2] for k2 in

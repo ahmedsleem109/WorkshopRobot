@@ -1,0 +1,22 @@
+# Line endings, enforced -- this repo is edited on Windows and RUN inside WSL.
+#
+# A shell script with CRLF endings fails in bash in a way that reads as nonsense: session 6 lost
+# a training run to `cd: $'/home/sleem/bringwrench\r': No such file or directory` after a
+# Windows-side edit rewrote ops/train_vla.sh with \r\n. core.autocrlf would reintroduce it on
+# every checkout, so the eol is pinned per type instead of left to the client's config.
+*.sh        text eol=lf
+*.bash      text eol=lf
+*.py        text eol=lf
+*.yaml      text eol=lf
+*.yml       text eol=lf
+*.json      text eol=lf
+*.md        text eol=lf
+
+# Windows-side launchers, which cmd.exe and PowerShell expect to be CRLF.
+*.cmd       text eol=crlf
+*.bat       text eol=crlf
+*.ps1       text eol=crlf
+
+*.mp4       binary
+*.png       binary
+*.npz       binary

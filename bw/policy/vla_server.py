@@ -25,7 +25,9 @@ import torch
 
 
 class VLA:
-    def __init__(self, ckpt: str, n_action_steps: int | None, device: str = "cuda"):
+    def __init__(self, ckpt: str, n_action_steps: int | None, device: str = "cuda",
+                 delta: bool = False):
+        self.delta = delta
         from lerobot.policies.factory import make_pre_post_processors
         from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
         from lerobot.configs.policies import PreTrainedConfig
@@ -74,7 +76,10 @@ def make_handler(vla: VLA):
             self.wfile.write(body)
 
         def do_GET(self):
-            self._send(200, {"ok": True}) if self.path == "/health" else self._send(404, {})
+            # `delta` is reported so the CLIENT cannot mismatch the convention the dataset was
+            # built with: a delta-trained policy served as absolute (or the reverse) produces
+            # plausible-looking numbers and a robot that does nothing useful.
+            self._send(200, {"ok": True, "delta": bool(vla.delta)})                 if self.path == "/health" else self._send(404, {})
 
         def do_POST(self):
             if self.path != "/act":
@@ -99,11 +104,14 @@ def main():
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--n-action-steps", type=int, default=10)
     ap.add_argument("--device", default="cuda", help="cpu: evaluate while the GPU trains")
+    ap.add_argument("--delta", action="store_true",
+                    help="the checkpoint was trained on DELTA arm actions (to_lerobot.py "
+                         "--delta); reported on /health so the client applies them correctly")
     args = ap.parse_args()
     t0 = time.time()
     if args.device == "cpu":
         torch.set_num_threads(8)
-    vla = VLA(args.ckpt, args.n_action_steps, args.device)
+    vla = VLA(args.ckpt, args.n_action_steps, args.device, delta=args.delta)
     print(f"[vla_server] {args.ckpt} loaded in {time.time() - t0:.0f}s, "
           f"{args.device}, :{args.port}", flush=True)
     ThreadingHTTPServer((args.host, args.port), make_handler(vla)).serve_forever()

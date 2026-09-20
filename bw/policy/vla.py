@@ -34,6 +34,24 @@ def health() -> bool:
         return False
 
 
+_delta = None
+
+
+def is_delta() -> bool:
+    """Does the served checkpoint predict DELTA arm actions? Asked of the server, once.
+
+    The convention lives with the checkpoint, not with this client, because getting it wrong is
+    silent: a delta policy whose output is applied as an absolute target drives the arm to
+    roughly zero joint angles, and an absolute policy applied as a delta barely moves it. Both
+    look like "the policy is bad" rather than "the client is wrong".
+    """
+    global _delta
+    if _delta is None:
+        with urllib.request.urlopen(URL + "/health", timeout=5.0) as r:
+            _delta = bool(json.loads(r.read()).get("delta", False))
+    return _delta
+
+
 def query(sim, task: str, reset: bool) -> np.ndarray:
     imgs = {k: np.ascontiguousarray(sim.render(cam)[..., :3]) for k, cam in CAMS.items()}
     h, w = next(iter(imgs.values())).shape[:2]
@@ -48,12 +66,20 @@ def run_skill(sim, task: str, max_s: float, done=None, rate_hz: float = 10.0,
     """Execute the policy for up to `max_s` seconds of sim time. `done(sim)` -> bool ends the
     episode early (e.g. the tool is lifted and held). Returns {"steps", "stopped_early"}."""
     steps, first = 0, True
+    delta = is_delta()
     n_max = int(max_s * rate_hz)
     while steps < n_max:
         chunk = query(sim, task, reset=first)
         first = False
         for a in chunk:
-            sim.move_arm(np.asarray(a, float), 1.0 / rate_hz, record, rate_hz)
+            a = np.asarray(a, float)
+            if delta:
+                # Each delta is applied to the LIVE joint position at the moment it executes,
+                # not to the state that was sent with the query. Within one chunk the arm has
+                # already moved, so chaining from the query-time state would accumulate the
+                # very drift the delta form is meant to avoid.
+                a = np.concatenate([sim.arm_q()[:6] + a[:6], [a[6]]])
+            sim.move_arm(a, 1.0 / rate_hz, record, rate_hz)
             steps += 1
             if steps >= n_max:
                 break

@@ -80,6 +80,13 @@ def trial(sim, orch, suite, seed):
     orch.human = human
     orch.on_walk_tick = None
     orch.interrupt = None
+    # Reseed the ORCHESTRATOR too, not just the scene. Its rng drives every scripted skill's
+    # randomised move durations, and it used to carry on from wherever the previous trial left
+    # it -- so a trial's outcome depended on which trials ran before it in the same process and
+    # a seed did not identify a trial. Measured 2026-09-20, same code and seeds: `--suite drop`
+    # alone scored 9/10 while `--suite transfer,drop` scored drop 6/10, and retarget seed 5
+    # failed in a batch but passed on its own. Now every trial is reproducible in isolation.
+    orch.rng = np.random.default_rng(70_000 + 1000 * seed + TOOL_NAMES.index(tool))
     first = None
     dest = "human"
     if suite in ("nominal", "missing", "drop"):

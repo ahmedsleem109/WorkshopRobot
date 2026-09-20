@@ -5,3 +5,6 @@ media/*.npz
 render_venv/
 .venv*/
 runs/
+
+# job-queue runtime state (the runner recreates these dirs)
+ops/queue/

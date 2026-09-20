@@ -33,8 +33,20 @@ WSL_SERVER = "/mnt/d/bringwrench/bw/perception/vlm_server.py"
 
 # Scene fact (bw/sim/workshop.py: grip rgba): 10 mm = blue band, 13 mm = red band.
 SIZE_TO_BAND = {10: "blue", 13: "red"}
+# "pliers" alone is REFUSED -- Qwen3-VL-2B answers "There are none." to 11 of the 17 views in
+# which the pliers are plainly visible. Naming their colour is what fixes it, the same pattern
+# as the wrenches' grip bands. Measured 2026-09-20, seeds 0-7, coarse stage
+# (scripts/_pliers_probe.py), refusals on those 17 views:
+#     pliers                       11/17 refused,  0/17 on the tool   <- the control
+#     red pliers                    2/17 refused,  3/17 on the tool   <- chosen
+#     red-handled gripping tool     1/17 refused,  2/17 on the tool
+#     pliers with red handles       6/17 refused,  1/17 on the tool
+#     tool with two red handles     8/17 refused,  1/17 on the tool
+# "red pliers" keeps the fewest refusals AND the most hits; "red-handled gripping tool" refuses
+# least but points worse, and a phrase that keeps the noun is the safer one to generalise from.
 ALIASES = {"tape": "roll of tape", "tape roll": "roll of tape", "tape_roll": "roll of tape",
-           "roll of tape": "roll of tape", "screwdriver": "screwdriver", "pliers": "pliers"}
+           "roll of tape": "roll of tape", "screwdriver": "screwdriver",
+           "pliers": "red pliers"}
 _SIZE = re.compile(r"(\d+)\s*(?:mm|millimet)", re.I)
 
 

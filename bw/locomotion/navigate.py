@@ -35,9 +35,19 @@ STALL_S, KICK_V, COAST = 0.6, 0.45, 0.04
 V_BACK, TOL_FINE, COAST_FINE = -0.25, 0.03, 0.03
 # Yaw is only trimmed when it is really off: a few-degree in-place turn slides the base ~10 cm
 # sideways, and the place skill plans with IK from the live base pose anyway.
-TOL_FINE_YAW, FINE_ROUNDS = np.radians(8.0), 6
+TOL_FINE_YAW, FINE_ROUNDS = np.radians(8.0), 8
+# An along-burst used to run until the whole along error was consumed (up to its 4 s cap, i.e.
+# over a metre at V_CREEP) with no lateral re-check inside it, so sideways drift accumulated
+# unmeasured. That is how the approach to station B fell OFF the walkway: the final 0.59 m hop
+# ended 0.43 m sideways of the line at x 3.19, y -1.60, and at that y the standable surface is
+# only the spur under table B, x 2.25-3.15 (measured 2026-09-20, obstacle seeds 0 and 3). The
+# burst now stops after STEP_ALONG of travel so the loop re-measures lateral error and fixes it
+# first; FINE_ROUNDS went 6 -> 8 to leave room for the extra segments.
+STEP_ALONG = 0.25        # m of forward/back travel per along-burst before re-measuring
 V_SIDE = 0.2             # m/s sidestep command (achieves ~0.10-0.14)
 FAR_EXTRA = 0.50         # m: the big-turn waypoint is this much further back than `pre`
+VIA_TOL = 0.20           # m: how near a VIA point counts as reached -- it is a place to pass
+                         # through, not a pose to stand in, so it gets none of the approach ritual
 
 
 def _wrap(a: float) -> float:
@@ -45,12 +55,18 @@ def _wrap(a: float) -> float:
 
 
 def walk_to(sim, station, backup: float = BACKUP, on_phase=None, timeout_s: float = 25.0,
-            turn_sign: int | None = None) -> dict:
+            turn_sign: int | None = None, via: bool = False) -> dict:
     """Walk `sim` (WorkshopSim with attach_locomotion()) to station (x, y, yaw).
 
     turn_sign=-1 turns in place only CLOCKWISE (the long way round when needed), for a
     policy that has learned one turn direction but not the other -- measured on the nav2
     checkpoints, turn right tracks from ~4M steps while turn left still stands.
+
+    via=True walks to (x, y) as a WAYPOINT: turn to face it, walk, finish facing `yaw`. None
+    of the station ritual applies -- no opening backup, no `far`/`pre` line, no creep, no
+    millimetre trimming. A detour waypoint walked as a station is walked backwards first and
+    then approached down a line that runs from BEHIND it, which on the rack -> table B detour
+    sent the base into the bench corner (measured: ended at x 5.2, off the walkway).
     """
     loco = sim.loco
     assert loco is not None, "attach_locomotion() first"
@@ -61,12 +77,19 @@ def walk_to(sim, station, backup: float = BACKUP, on_phase=None, timeout_s: floa
     pre = np.array([xs, ys]) - PRE_DIST * h
     t_start = sim.time
     log = []
+    # The FIRST phase that timed out, and the body-frame command it was asking for. A walk
+    # that runs out of time is the only evidence this robot has of an obstacle, and which way
+    # it was being pushed when it stopped says which side the obstacle is on -- the scenario
+    # box is dropped BEHIND the robot, where a disc projected along the heading misses it.
+    stall_rec = {}
+    last_cmd = [0.0, 0.0, 0.0]
 
     def pose():
         p = loco.get_base_pose()
         return p.pos[:2].copy(), p.yaw
 
     def tick(cmd):
+        last_cmd[:] = list(cmd)
         loco.set_velocity(*cmd)
         sim.physics_step(loco.n_substeps)
         if not loco.is_stable():
@@ -78,6 +101,10 @@ def walk_to(sim, station, backup: float = BACKUP, on_phase=None, timeout_s: floa
         while not done_fn():
             if sim.time - t0 > limit:
                 log.append((name, "timeout"))
+                if not stall_rec:
+                    xy_s, yaw_s = pose()
+                    stall_rec.update(phase=name, xy=[float(xy_s[0]), float(xy_s[1])],
+                                 yaw=float(yaw_s), cmd=[float(c) for c in last_cmd])
                 return False
             tick(cmd_fn())
         log.append((name, round(sim.time - t0, 2)))
@@ -136,14 +163,22 @@ def walk_to(sim, station, backup: float = BACKUP, on_phase=None, timeout_s: floa
                         (np.linalg.norm(d) < 0.25 and abs(_wrap(np.arctan2(d[1], d[0]) - yaw)) > np.radians(90)))
             return run(name, cmd, arrived, 15.0)
 
-        if not short:
+        if via:
+            target = np.array([xs, ys])
+            ok = ok and run("turn_via", lambda: turn_cmd(lambda: bearing_to(target)),
+                            lambda: abs(_wrap(bearing_to(target) - pose()[1])) < np.radians(12),
+                            12.0)
+            ok = ok and goto(target, "goto_via", VIA_TOL)
+            ok = ok and run("align_via", lambda: turn_cmd(lambda: yaws),
+                            lambda: abs(_wrap(yaws - pose()[1])) < np.radians(10), 12.0)
+        elif not short:
             ok = ok and run("turn", lambda: turn_cmd(lambda: bearing_to(far)),
                             lambda: abs(_wrap(bearing_to(far) - pose()[1])) < np.radians(10), 12.0)
             ok = ok and goto(far, "goto_far", 0.10)
             ok = ok and goto(pre, "goto_pre", 0.05)
 
         # --- trim the heading (small by construction)
-        ok = ok and (short or run("align", lambda: turn_cmd(lambda: yaws),
+        ok = ok and (short or via or run("align", lambda: turn_cmd(lambda: yaws),
                                   lambda: abs(_wrap(yaws - pose()[1])) < np.radians(5), 10.0))
 
         # --- approach: creep forward, vy for lateral error, wz for heading
@@ -178,7 +213,7 @@ def walk_to(sim, station, backup: float = BACKUP, on_phase=None, timeout_s: floa
             return (V_CREEP, vy, 0.0)
 
         # Stop COAST early: the base keeps going ~2-5 cm after the command drops to zero.
-        ok = ok and (short or run("approach", creep_cmd,
+        ok = ok and (short or via or run("approach", creep_cmd,
                                   lambda: errs()[0] < COAST or abs(errs()[1]) > 0.30, 8.0))
         def still():
             return np.linalg.norm(sim.d.qvel[:2]) < 0.03 and abs(sim.d.qvel[5]) < 0.05
@@ -209,22 +244,24 @@ def walk_to(sim, station, backup: float = BACKUP, on_phase=None, timeout_s: floa
         # Yaw FIRST (at most twice), then only lateral / along -- never yaw again: at table A an
         # in-place yaw trim also pushed the base 5-8 cm FORWARD toward the bench, so a loop that
         # alternated yaw and back-up oscillated and ended 9-14 cm past the mark.
-        for k in range(2):
+        for k in (() if via else range(2)):
             eyaw = errs()[2]
             if abs(eyaw) <= TOL_FINE_YAW:
                 break
             sg = np.sign(eyaw)
             burst(f"fine_yaw{k}", (0.0, 0.0, sg * W_MIN), lambda: sg * errs()[2] < np.radians(1.5))
             run(f"stop_yaw{k}", lambda: (0.0, 0.0, 0.0), still, 3.0)
-        for k in range(FINE_ROUNDS):
+        for k in (() if via else range(FINE_ROUNDS)):
             along, lat, _ = errs()
             if abs(lat) > TOL_FINE:
                 sg = np.sign(lat)
                 burst(f"fine{k}_side", (0.0, sg * V_SIDE, 0.0), lambda: sg * errs()[1] < 0.01)
             elif abs(along) > TOL_FINE:
                 sg = np.sign(along)
+                xy_b = pose()[0].copy()
                 burst(f"fine{k}_along", (V_CREEP if sg > 0 else V_BACK, 0.0, 0.0),
-                      lambda: sg * errs()[0] < COAST_FINE)
+                      lambda: (sg * errs()[0] < COAST_FINE
+                               or np.linalg.norm(pose()[0] - xy_b) > STEP_ALONG))
             else:
                 break
             run(f"stop{k}", lambda: (0.0, 0.0, 0.0), still, 3.0)
@@ -240,4 +277,4 @@ def walk_to(sim, station, backup: float = BACKUP, on_phase=None, timeout_s: floa
             "along_mm": round(1000 * float(d_end @ h), 1),
             "lateral_mm": round(1000 * float(d_end @ np.array([-h[1], h[0]])), 1),
             "err_xy_mm": round(1000 * err_xy, 1), "err_yaw_deg": round(err_yaw, 1),
-            "time_s": round(sim.time - t_start, 1), "phases": log}
+            "time_s": round(sim.time - t_start, 1), "phases": log, "stall": stall_rec or None}

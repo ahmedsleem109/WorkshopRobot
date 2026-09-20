@@ -33,14 +33,15 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from bw.locomotion.navigate import walk_to
+from bw.locomotion.local_plan import blocked_direction, estimate_blockage, plan_detour
+from bw.locomotion.navigate import PRE_DIST, walk_to
 from bw.manip.ik import ArmIK
 from bw.manip import scripted_grasp as sg
 from bw.manip import scripted_place as sp
 from bw.sim.workshop import PLACE_STATION, RACK_STATION, TABLES
 from bw.task.language import TOOL_SYNONYMS
 
-DETOUR = 0.9                      # m: how far off the straight line a replan steps (T10 #3)
+DETOUR_TRIES = 3                  # how many planned detours are attempted (T10 #3)
 VIA_STEP = (0.3, 0.0, np.pi)      # past the walkway end; measured: 17/20 reach the human (x=-0.3, crossing at speed: 16/24)
 DESC = {"wrench_10mm": "10mm wrench", "wrench_13mm": "13mm wrench", "pliers": "pliers",
         "tape_roll": "roll of tape", "screwdriver": "screwdriver"}
@@ -105,6 +106,7 @@ class Orchestrator:
         self.on_walk_tick = None        # scenario hook: called during walks (drop injection)
         self.interrupt = None           # scenario hook: () -> a new command, or None (T10 #5)
         self._pick = None               # the last grasp's plan (site / R / approach)
+        self._last_walk = None          # the last walk_to result, for the replan's stall record
 
     # ----------------------------------------------------------------- skills
     def _log(self, res: Result, state: str, **kw):
@@ -113,60 +115,128 @@ class Orchestrator:
         if self.verbose:
             print("   ", e, flush=True)
 
-    def navigate_to_replan(self, station, res: Result, name: str, tries: int = 2) -> bool:
-        """navigate_to, plus ONE detour per side if the walk stalls without falling (T10 #3).
+    def navigate_to_replan(self, station, res: Result, name: str,
+                           tries: int = DETOUR_TRIES) -> bool:
+        """navigate_to, plus planned detours if a walk stalls without falling (T10 #3).
 
-        The robot has no obstacle perception: a box on the route shows up as a walk that runs out
-        of time with the base still far from the station. The recovery is geometric -- step
-        sideways off the straight line and approach from there, first one side, then the other.
+        The robot has no obstacle perception. What a blocked walk gives it is the pose it
+        stalled in and the direction it was being commanded in at that moment (walk_to's
+        `stall` record); bw.locomotion.local_plan turns that pair into a disc and routes
+        around it over the standable surface only. Each further stall adds another disc, so a
+        second attempt knows where the first one died.
+
+        Two things the fixed +-0.9 m offset this replaced got wrong, both measured: the escape
+        drove BACKWARDS even when it was the backup that had been blocked (the scenario box is
+        dropped behind the robot), and the detour legs turned counter-clockwise, which with a
+        tool held fell 3/3 (session 5). The escape now drives against the blocked direction and
+        the legs turn clockwise only.
         """
-        start = self.sim.d.qpos[:2].copy()          # where the blocked walk began
         if self.navigate_to(station, res, name):
             return True
+        h = np.array([np.cos(station[2]), np.sin(station[2])])
+        goal = np.array(station[:2]) - PRE_DIST * h     # the point the walk approaches from;
+                                        # the station itself can sit inside the blocked disc
+        blocked = []
         for k in range(tries):
             if not self.sim.loco.is_stable():
                 return False                      # it fell: not an obstacle
-            d = np.array(station[:2]) - start
-            n = float(np.linalg.norm(d))
-            if n < 1e-3:
-                return False
-            d = d / n
-            side = 1.0 if k % 2 == 0 else -1.0
-            # offset from the ORIGINAL line, not from the pose the robot is wedged in: measured,
-            # a detour planned from the stuck pose routed straight back into the box
-            way = start + 0.5 * n * d + np.array([-d[1], d[0]]) * side * DETOUR
-            way = (float(np.clip(way[0], 1.5, 4.2)), float(np.clip(way[1], -1.4, 1.4)),
-                   float(np.arctan2(d[1], d[0])))
-            self._log(res, "REPLAN", attempt=k + 1, side="left" if side > 0 else "right",
-                      via=[round(v, 2) for v in way[:2]])
-            self.back_off(0.6)          # a blocked walk ends WEDGED against the box; walk_to's
-                                        # own 0.4 m backup is not enough to free the gait
-            if self.navigate_to(way, res, f"{name}_detour{k}") and                     self.navigate_to(station, res, name):
+            stall = (self._last_walk or {}).get("stall")
+            if not stall:
+                return False                      # it failed for some reason other than time
+            blocked.append(estimate_blockage(stall))
+            self.escape(blocked_direction(stall), 0.6)
+            start = self.sim.d.qpos[:2].copy()
+            ways = plan_detour(start, goal, blocked)
+            if not ways:
+                self._log(res, "REPLAN", attempt=k + 1, via=None)
+                return False            # nowhere standable left: do not walk into it again
+            way = ways[0]
+            self._log(res, "REPLAN", attempt=k + 1, via=[round(v, 2) for v in way[:2]],
+                      stalled=stall["phase"],
+                      blocked=[[round(float(c[0]), 2), round(float(c[1]), 2)] for c, _ in blocked])
+            # The detour is walked as WAYPOINTS (via=True): a detour point is somewhere to
+            # pass through, not a pose to stand in. The last one is `goal` itself -- the
+            # station's own approach point -- reached already facing the station, so the walk
+            # that follows is the short hop and never re-runs the blocked `far`/`pre` line.
+            legs = [(*way[:2], way[2]), (float(goal[0]), float(goal[1]), float(station[2]))]
+            if not all(self.navigate_to(w, res, f"{name}_detour{k}.{i}", turn_sign=-1,
+                                        backup=0.0, via=True)
+                       for i, w in enumerate(legs)):
+                continue
+            if self.navigate_to(station, res, name, turn_sign=-1):
                 return True
         return False
 
-    def back_off(self, dist: float = 1.0, timeout_s: float = 8.0):
-        """Straight back at the policy's back-up speed until `dist` or `timeout_s`."""
+    def escape(self, world_dir, dist: float = 0.6, timeout_s: float = 8.0):
+        """Drive AWAY from `world_dir` (a world-frame unit vector) until `dist` or timeout.
+
+        Body-frame, because that is the only command interface the policy has: the world
+        direction to escape in is rotated into the base frame and issued as vx/vy.
+        """
         loco = self.sim.loco
+        d = -np.asarray(world_dir, float)[:2]
         x0 = self.sim.d.qpos[:2].copy()
         t0 = self.sim.time
+        still, kick = 0.0, 0
         while (float(np.linalg.norm(self.sim.d.qpos[:2] - x0)) < dist
                and self.sim.time - t0 < timeout_s and loco.is_stable()
-               and self.sim.d.qpos[0] < 4.05):        # do not back into the bench (x 4.45)
-            loco.set_velocity(-0.25, 0.0, 0.0)
+               and self.sim.d.qpos[0] < 4.05):        # do not drive into the bench (x 4.45)
+            yaw = loco.get_base_pose().yaw
+            c, sn = np.cos(-yaw), np.sin(-yaw)
+            vx, vy = c * d[0] - sn * d[1], sn * d[0] + c * d[1]
+            speed = 0.25
+            still = 0.0 if float(np.linalg.norm(self.sim.d.qvel[:2])) > 0.03 else still + loco.dt
+            if still > 0.6:
+                kick, still = int(0.3 / loco.dt), 0.0
+            if kick > 0:
+                kick -= 1
+                speed = 0.40
+            loco.set_velocity(speed * float(vx), speed * float(vy), 0.0)
             self.sim.physics_step(loco.n_substeps)
         loco.set_velocity(0.0, 0.0, 0.0)
         self.sim.settle(0.4)
 
-    def navigate_to(self, station, res: Result, name: str) -> bool:
+    def back_off(self, dist: float = 1.0, timeout_s: float = 8.0):
+        """Straight back at the policy's back-up speed until `dist` or `timeout_s`.
+
+        With the same stall kick the navigator's bursts use: from a standstill -- and wedged
+        against a box is the worst case -- a bare -0.25 m/s command often does not get the
+        gait going at all, which is what left the replan pressed into the obstacle.
+        """
+        loco = self.sim.loco
+        x0 = self.sim.d.qpos[:2].copy()
+        t0 = self.sim.time
+        still, kick = 0.0, 0
+        while (float(np.linalg.norm(self.sim.d.qpos[:2] - x0)) < dist
+               and self.sim.time - t0 < timeout_s and loco.is_stable()
+               and self.sim.d.qpos[0] < 4.05):        # do not back into the bench (x 4.45)
+            still = 0.0 if float(np.linalg.norm(self.sim.d.qvel[:2])) > 0.03 else still + loco.dt
+            if still > 0.6:
+                kick, still = int(0.3 / loco.dt), 0.0
+            if kick > 0:
+                kick -= 1
+                loco.set_velocity(-0.40, 0.0, 0.0)
+            else:
+                loco.set_velocity(-0.25, 0.0, 0.0)
+            self.sim.physics_step(loco.n_substeps)
+        loco.set_velocity(0.0, 0.0, 0.0)
+        self.sim.settle(0.4)
+
+    def navigate_to(self, station, res: Result, name: str, turn_sign=None,
+                    backup: float | None = None, via: bool = False) -> bool:
         t0 = time.time()
         hook = self.on_walk_tick
         # the route to the human needs a big LEFT turn at the rack, and the mirrored left turn
         # fell 3/3 with a tool held (session 5): turn clockwise the long way round instead
-        w = walk_to(self.sim, station, turn_sign=-1 if name in ("via_step", "human") else None,
-                    on_phase=(lambda ph: hook(self, ph)) if hook else None)
+        if name in ("via_step", "human"):
+            turn_sign = -1
+        kw = {} if backup is None else {"backup": backup}
+        w = walk_to(self.sim, station, turn_sign=turn_sign, via=via,
+                    on_phase=(lambda ph: hook(self, ph)) if hook else None, **kw)
+        self._last_walk = w
         res.timings[name] = res.timings.get(name, 0.0) + time.time() - t0
-        self._log(res, "NAV", to=name, ok=w["success"], fell=w["fell"], err_mm=w["err_xy_mm"])
+        self._log(res, "NAV", to=name, ok=w["success"], fell=w["fell"], err_mm=w["err_xy_mm"],
+                  at=[round(float(v), 2) for v in self.sim.d.qpos[:2]], phases=w["phases"])
         return bool(w["success"])
 
     def _point_fn(self):
