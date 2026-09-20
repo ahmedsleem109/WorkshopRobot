@@ -56,6 +56,7 @@ def main():
                     help="override the station's distance behind the zone centre (m)")
     ap.add_argument("--walk", nargs="?", const=str(ROOT / "models/payload_nav_policy.npz"),
                     default=None, help="walk between stations with this policy .npz")
+    ap.add_argument("--tool", action="append", default=None, help="only these tools")
     ap.add_argument("-v", action="store_true")
     args = ap.parse_args()
     if args.roll is not None:
@@ -74,11 +75,12 @@ def main():
     ik = ArmIK(sim.m)
     walks = []
     stages = Counter()
-    per = {t: Counter() for t in GRASP_TOOLS}
+    tools = args.tool or GRASP_TOOLS
+    per = {t: Counter() for t in tools}
     dists = []
     t0 = time.time()
     for seed in range(args.seeds):
-        for tool in GRASP_TOOLS:
+        for tool in tools:
             ti = TOOL_NAMES.index(tool)
             rng = np.random.default_rng(1000 * seed + ti)
             present = sim.reset(rng, target=tool, arm_q=SCAN_Q, base_pose=RACK_STATION)
@@ -93,6 +95,8 @@ def main():
                 else:
                     sim.settle(0.3)
                     p = {**run_place(sim, ik, tool, args.table, rng), "walk": w}
+                    if p.get("reason") not in ("place_ik_fail", "not_holding"):
+                        p = {**p, **evaluate(sim, Task("transfer", tool, args.table), start)}
             elif g["success"]:
                 sim.teleport_base(station, carry=tool)
                 sim.settle(0.3)
@@ -112,7 +116,7 @@ def main():
     n = sum(stages.values())
     print(f"\n{time.time() - t0:.0f}s, {n} transfers to {args.table} "
           f"(PLACE_ROLL {'auto' if sp.PLACE_ROLL is None else f'{np.degrees(sp.PLACE_ROLL):.0f} deg'})")
-    for t in GRASP_TOOLS:
+    for t in tools:
         print(f"  {t:12s} {per[t]['ok']}/{sum(per[t].values())}   {dict(per[t])}")
     print("overall", dict(stages), f"success {stages['ok'] / max(n, 1):.0%}")
     if walks:

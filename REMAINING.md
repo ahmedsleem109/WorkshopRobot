@@ -203,7 +203,7 @@ the far bench". The VLA must execute both halves, so the demonstrations must con
       0.48 m behind each zone, from a `try_place.py --back` sweep. Original: **T2.2 Reachability audit.** Re-run the reach search (`scripts/find_scan_pose.py` pattern)
       for both tables and record which base poses serve which table; the orchestrator needs
       those as navigation goals.
-- [ ] **T2.3 BUILT, below the bar (session 3):** see the STATUS.md header for numbers; the
+- [x] **T2.3 DONE (session 5): 120/125 table A, 124/125 table B, every tool >= 92%, legs on the walking policy.** Session-3 note kept: see the STATUS.md header for numbers; the
       dominant failure is the tool toppling out of the zone after release. Original: **T2.3 `place` skill** in `bw/manip/scripted_place.py`: approach above the place zone,
       descend to contact (or a fixed clearance), open the jaws, retract, verify the tool is
       resting in the zone and the gripper is empty. Acceptance: **≥90%** placement success for
@@ -256,10 +256,12 @@ Everything needed is in place; **the two bugs that would have wasted the run are
 
 ## T5 — Validate the numpy Layer 3 controller `[blocks T9]`
 
-- [ ] Roll out the same checkpoint in MJX (`Go2ArmEnv`) and in `controller.py` on CPU from an
-      identical state and assert the observation vectors match element-wise (they must, the
-      layout is copied by hand) and that the actions agree to ~1e-5 for 100 steps.
-- [ ] Then validate `base_mode="policy"` in `WorkshopSim`: the robot must stand still under a
+- [x] **DONE (session 5)**, `scripts/t5_obs_check.py`: obs blocks agree to <= 1.2e-7 and the
+      action to **1.8e-6** over 100 steps (bar 1e-5). No change to `controller.py`.
+- [x] **DONE (session 5)**: `base_mode="policy"` is the mode every benchmark now runs in
+      (grasp 125/125, transfer 244/250). The legs are joint-PD stand-locked during manipulation
+      (`Locomotion.lock_stance`); under the raw policy the arm pushes the base back 25-35 mm.
+      Original: validate `base_mode="policy"` in `WorkshopSim`: the robot must stand still under a
       zero command while the arm executes a grasp, and stay standing (this is the mode the whole
       pipeline runs in, and it has never been exercised).
 
@@ -267,20 +269,20 @@ Everything needed is in place; **the two bugs that would have wasted the run are
 
 ## T6 — Demonstration data in LeRobot v2.0 format `[needs T1, T2]`
 
-- [ ] **T6.1** Collector: run pick and pick-and-place episodes on Windows (rendering), write
+- [x] **T6.1 DONE (session 5)** `scripts/collect_demos.py` (wrist + MAST RGB; the head camera sees only the bench panel). Original: run pick and pick-and-place episodes on Windows (rendering), write
       wrist RGB (256×256) + arm state (7) + action (7, the 10 Hz commanded target) + language
       instruction per episode; keep successes only; randomize object pose, lighting, clutter,
       initial arm configuration, base pose.
-- [ ] **T6.2 Instruction paraphrases — the known VLA failure mode.** Every episode gets a
+- [x] **T6.2 DONE (session 5)** -- `bw/task/language.py` draws per episode; `check_diversity` guards it. Original: **T6.2 Instruction paraphrases — the known VLA failure mode.** Every episode gets a
       different phrasing of the same intent ("grab the 10mm", "hand me the small spanner",
       "put the pliers on the far table"). Generate with a local LLM or template × synonym
       expansion; assert at collection time that no object is ever paired with a single fixed
       string. If phrasing does not vary, the policy learns the object from vision and ignores
       language entirely.
-- [ ] **T6.3** Target volume: ~600 pick + ~600 transfer episodes attempted; with T1/T2 at ≥90%
+- [x] **T6.3 DONE (session 5): 600 runs -> 598 pick + 540 place episodes kept (successes only).** Original: ~600 pick + ~600 transfer episodes attempted; with T1/T2 at ≥90%
       that yields ≥1,000 clean demos (the plan's documented range is 50–200 per task, so this
       is headroom for the two-skill dataset).
-- [ ] **T6.4** Convert to `LeRobotDataset` v2.0 in the torch venv, verify it loads, videos
+- [x] **T6.4 DONE (session 5): 1,128 episodes, ~104k frames. NOTE lerobot 0.6.1 writes v3.0, not v2.0** (`scripts/to_lerobot.py`, 8 shards + merge; loads and trains). Original: Convert to `LeRobotDataset` v2.0 in the torch venv, verify it loads, videos
       encode, and the instruction is attached per episode.
 
 ---
@@ -289,11 +291,11 @@ Everything needed is in place; **the two bugs that would have wasted the run are
 
 Backbone choice is settled — see "Model roles" above. SmolVLA, not a 4B VLM.
 
-- [ ] **T7.1** Baseline run from `lerobot/smolvla_base` on the pick-only subset, to establish the
+- [x] **T7.1 DONE (session 5): pick-only, 120 episodes, 2,000 steps, loss 0.67 -> 0.060; grasp 1/10 on held-out seeds.** The reference number, and proof that collect -> convert -> train -> serve -> roll out works. Original: from `lerobot/smolvla_base` on the pick-only subset, to establish the
       pipeline and a reference number.
 - [ ] **T7.2** Full run on pick + transfer. Kaggle's free tier (~30 GPU h/week, 16 GB) is the
       intended compute; local 6 GB is the fallback with LoRA + bf16 + grad accumulation.
-- [ ] **T7.3** A real eval protocol, fixed before training: held-out seeds, 100 rollouts,
+- [x] **T7.3 DONE (session 5): `scripts/eval_vla.py`** -- held-out seeds, all five tools present, grasp / correct-object / transfer reported separately, the instruction printed per episode. Original:, fixed before training: held-out seeds, 100 rollouts,
       reporting **grasp success**, **correct-object selection with both wrenches present**, and
       **transfer success (right object AND right table)** as three separate numbers. Assert the
       instruction string that actually reaches the policy each episode — a stale cache produced
@@ -312,14 +314,14 @@ Targets: grasp ≥70%, correct-wrench ≥80% (plan's gate), transfer ≥60% as t
 
 ## T8 — Grounding: `locate()` `[needs T0]`
 
-- [ ] `vlm.point(image, description) -> (u, v) | None` behind one function, separate process,
+- [x] **DONE (session 5)** `bw/perception/vlm.py` + `vlm_server.py`. Original: `vlm.point(image, description) -> (u, v) | None` behind one function, separate process,
       4-bit, **never inside a control loop** (2–5 s per call). Model chosen in T0 — a 4-bit
       pointing specialist, not Molmo2-ER, unless T0.3 says otherwise.
-- [ ] `locate(description) -> Pose3D | None`: point → wrist-camera depth lookup → camera frame →
+- [x] **DONE (session 5)** `bw/perception/locate.py`; the `None` case is implemented and used by the orchestrator. Original: `locate(description) -> Pose3D | None`: point → wrist-camera depth lookup → camera frame →
       base frame. The **`None` case is required** (it drives the floor-sweep recovery).
-- [ ] Score grounding error against ground truth (sim gives it free): report median error and
+- [x] **DONE (session 5): xy median 13.4 mm, miss 11%, pliers 0/7 (open).** Original: Score grounding error against ground truth (sim gives it free): report median error and
       miss rate. Do not feed ground truth into the pipeline.
-- [ ] Scan strategy: the gripper occludes the middle of the wrist view, so `locate` takes 2–3
+- [x] **DONE (session 5)**: 3 views at `arm_joint1` +-0.35 rad, merged. Original: Scan strategy: the gripper occludes the middle of the wrist view, so `locate` takes 2–3
       views at different `arm_joint1` offsets and merges.
 - [ ] **T8.6 (conditional stretch, condition NOT triggered) fine-tune the grounding model** on sim-generated point
       labels — LoRA on Qwen3-VL-2B/4B or the chosen Molmo pointer, using the unlimited exact
@@ -333,12 +335,12 @@ Targets: grasp ≥70%, correct-wrench ≥80% (plan's gate), transfer ≥60% as t
 
 ## T9 — Orchestrator `[needs T5, T7, T8]`
 
-- [ ] Tools: `navigate_to`, `locate`, `grasp`, `place`, `release`, `stow_arm`, `ask_human`.
-- [ ] State machine with explicit gate checks (base at pose? gripper holding? point returned?),
+- [x] **DONE (session 5)** `bw/orchestrator.py` (+ `run_handoff` for the release to the human).
+- [x] **DONE (session 5)**, gates are observable-only. Original: State machine with explicit gate checks (base at pose? gripper holding? point returned?),
       timeouts, and an `on_failure` transition per state.
-- [ ] `stow_arm` needs its own tuning: folding the arm with a tool in the jaws dropped it in
+- [x] **DONE (session 5)**: Cartesian `stow_arm()` to `STOW_B`; needed for the step down. Original: folding the arm with a tool in the jaws dropped it in
       testing, so stow must keep the wrist orientation and move in Cartesian space.
-- [ ] Nominal decompositions: `navigate_to(bench) → locate → grasp → navigate_to(human) → release`
+- [x] **DONE (session 5)**, both run end to end. Original: Nominal decompositions: `navigate_to(bench) → locate → grasp → navigate_to(human) → release`
       and `navigate_to(table A) → locate → grasp → navigate_to(table B) → place`.
 
 ---
@@ -357,9 +359,9 @@ Keep 1, 2 and 4 if time is short (the plan's own cut line):
 
 ## T11 — Evaluation suite `[needs T9, T10]`
 
-- [ ] 50 nominal trials (5 objects × 10) + the transfer task + 5 scenarios × 5 trials.
-- [ ] Every failure tagged with a cause; the failure-cause table is the headline result.
-- [ ] Latency budget per layer (afternoon's work, systems people love it).
+- [x] **DONE (session 5)** `scripts/eval_suite.py` -- nominal / transfer / missing / drop / ambiguous, scripted skills + oracle grounding; scenarios 3 and 5 cut for time. Original: 50 nominal trials (5 objects × 10) + the transfer task + 5 scenarios × 5 trials.
+- [x] **DONE (session 5)**: the table is in STATUS.md; the dominant cause is the step DOWN off the walkway with a tool held.
+- [x] **DONE (session 5)**: locate 2.8 s, grasp 10 s, walk 12-17 s, place 8 s (median wall clock).
 
 ## T12 — Publish `[needs T11]`
 
@@ -394,3 +396,9 @@ Keep 1, 2 and 4 if time is short (the plan's own cut line):
 | session 3 | screwdriver stands handle-down; back in GRASP_TOOLS, GRASP_Z 0.064 | spontaneous falls 9/40 -> 0/40; screwdriver 0/8 -> 12/12 |
 | session 3 | servo target ramped across each 10 Hz tick (the "vibration") | see STATUS header |
 | session 1 | grounding model: 4-bit pointing model (3.7 GB) chosen over Molmo2-ER (19.4 GB F32) | see T0 |
+| session 5 | tape roll pinched RADIALLY at the ring's crown (was 45 deg up the rim, lateral jaw) | tape on legs 8/25 -> 25/25 |
+| session 5 | legs joint-PD stand-locked during manipulation (`lock_stance`) | base drift under the arm 25-35 mm -> ~0 |
+| session 5 | screwdriver placed UPRIGHT (was flipped and stood on its shaft tip) | table A 16/25 -> 24/25 |
+| session 5 | handoff tray on a 0.45 m stand + joint-space move to a multi-start IK solution | handoff probe 1/3 -> 3/3 |
+| session 5 | `locate()` NEAR_CLIP 0.25 -> 0.16 m (tools at the rack ends sit 0.22 m from the lens) | those tools were always missed |
+| session 5 | route to the human: stow + via-waypoint past the step, clockwise turns only | reaching the human 0/3 -> 17/20 |

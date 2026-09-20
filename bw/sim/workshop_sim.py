@@ -217,6 +217,7 @@ class WorkshopSim:
         self._hold_qpos = d.qpos[:19].copy()
         self.time = 0.0
         if self.loco is not None:
+            self.loco.locked = None           # the policy stands the robot up after a reset
             self.loco.reset()                 # fresh observation history for the new state
             self._loco_k = 0
         # Tools must be STATIC before a grasp is planned from their pose -- to a measured
@@ -240,6 +241,12 @@ class WorkshopSim:
                     self._loco_k = 0
                     loco.after_physics()
         self.time += n * self.m.opt.timestep
+
+    def lock_stance(self, on: bool = True):
+        """Legs on joint-PD stand-lock while the arm works (no-op unless the policy owns the
+        legs); see Locomotion.lock_stance."""
+        if self.loco is not None and self.base_mode == "policy":
+            self.loco.lock_stance(on)
 
     def settle(self, seconds: float):
         self.physics_step(int(seconds / self.m.opt.timestep))

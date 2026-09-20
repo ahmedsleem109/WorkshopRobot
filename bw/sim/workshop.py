@@ -65,6 +65,10 @@ RACK_HALF_Y = 0.32
 RACK_SLOT_Y = (-0.24, -0.12, 0.0, 0.12, 0.24)
 TRAY_CENTER = RACK_CENTER         # kept: navigation/orchestration refer to the bench station
 HANDOFF_TRAY = (-0.25, 1.8)
+# The handoff tray stands on a 0.45 m stand, not the floor (session 5): with a level grip the Z1
+# on the Go2 cannot get below ~0.5 m over a tray 0.55 m ahead, so a floor tray meant a 0.5 m
+# drop -- the screwdriver bounced out and the tape roll stayed hooked on a finger (4/10).
+HANDOFF_Z = 0.45
 HUMAN_POS = (-0.75, 2.05)
 BOX_PARK = (0.0, -8.0)              # scenario-3 obstacle, parked out of the scene
 
@@ -413,7 +417,10 @@ def build_workshop_xml(robot_file: str = "go2z1_scene_robot.xml") -> str:
     <site name="zone_table_b_center" pos="{PLACE_ZONE["table_b"][0]:.3f} {PLACE_ZONE["table_b"][1]:.3f} {BENCH_HEIGHT:.3f}" size="0.01" group="4"/>
 
     <!-- handoff: a low tray on the floor in front of the human -->
-    <body name="handoff" pos="{HANDOFF_TRAY[0]} {HANDOFF_TRAY[1]} 0">
+    <body name="handoff_stand" pos="{HANDOFF_TRAY[0]} {HANDOFF_TRAY[1]} 0">
+      <geom type="box" size="0.17 0.13 {HANDOFF_Z / 2 - 0.002:.3f}" pos="0 0 {HANDOFF_Z / 2 - 0.002:.3f}" rgba="0.35 0.3 0.25 1" contype="7" conaffinity="7"/>
+    </body>
+    <body name="handoff" pos="{HANDOFF_TRAY[0]} {HANDOFF_TRAY[1]} {HANDOFF_Z}">
       <geom name="handoff_floor" type="box" size="0.2 0.16 0.004" pos="0 0 0.004" rgba="0.2 0.55 0.25 1" contype="7" conaffinity="7"/>
       <geom type="box" size="0.2 0.006 0.02" pos="0 0.16 0.02" rgba="0.2 0.55 0.25 1" contype="7" conaffinity="7"/>
       <geom type="box" size="0.2 0.006 0.02" pos="0 -0.16 0.02" rgba="0.2 0.55 0.25 1" contype="7" conaffinity="7"/>

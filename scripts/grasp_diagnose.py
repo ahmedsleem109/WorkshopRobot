@@ -32,7 +32,7 @@ import numpy as np
 
 from bw.manip.ik import ArmIK
 from bw.manip.scripted_grasp import SCAN_Q, run_grasp
-from bw.sim.workshop import GRASP_TOOLS, TOOL_NAMES
+from bw.sim.workshop import GRASP_TOOLS, RACK_STATION, TOOL_NAMES
 from bw.sim.workshop_sim import FING_A, WorkshopSim
 
 SLIP_MM = 2.0          # the threshold the task list asks for
@@ -90,7 +90,9 @@ class Probe:
                     rx=rel_p[0], ry=rel_p[1], rz=rel_p[2], rel_R=rel_R.copy(),
                     fa=f["pad_a"], fb=f["pad_b"], frack=f["rack"],
                     na=ncon["pad_a"], nb=ncon["pad_b"], nrack=ncon["rack"],
-                    grip_q=float(d.qpos[FING_A]), tool_z=float(p_t[2]), ee_z=float(p_ee[2]))
+                    grip_q=float(d.qpos[FING_A]), tool_z=float(p_t[2]), ee_z=float(p_ee[2]),
+                    bx=float(d.qpos[0]), by=float(d.qpos[1]), bz=float(d.qpos[2]),
+                    ex=float(p_ee[0]), ey=float(p_ee[1]))
 
 
 def analyse(rows):
@@ -132,15 +134,19 @@ def main():
     ap.add_argument("seeds", nargs="?", type=int, default=4)
     ap.add_argument("--tool", default=None, help="only this tool")
     ap.add_argument("--csv", default=str(ROOT / "runs/grasp_diag.csv"))
+    ap.add_argument("--walk", nargs="?", const=str(ROOT / "models/payload_nav_policy.npz"),
+                    default=None, help="legs on this walking policy (base at RACK_STATION)")
     args = ap.parse_args()
 
     tools = [args.tool] if args.tool else list(GRASP_TOOLS)
     sim = WorkshopSim()
+    if args.walk:
+        sim.attach_locomotion(args.walk)
     ik = ArmIK(sim.m)
     csv_path = Path(args.csv)
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     fields = ["seed", "tool", "t", "phase", "rx", "ry", "rz", "fa", "fb", "frack",
-              "na", "nb", "nrack", "grip_q", "tool_z", "ee_z"]
+              "na", "nb", "nrack", "grip_q", "tool_z", "ee_z", "bx", "by", "bz", "ex", "ey"]
     summaries = []
     t0 = time.time()
     with csv_path.open("w", newline="", encoding="utf-8") as fh:
@@ -150,7 +156,8 @@ def main():
             for tool in tools:
                 ti = TOOL_NAMES.index(tool)
                 rng = np.random.default_rng(1000 * seed + ti)
-                sim.reset(rng, target=tool, arm_q=SCAN_Q)
+                sim.reset(rng, target=tool, arm_q=SCAN_Q,
+                          base_pose=RACK_STATION if args.walk else None)
                 probe = Probe(sim, tool)
                 try:
                     r = run_grasp(sim, ik, tool, rng, on_phase=probe.set_phase)

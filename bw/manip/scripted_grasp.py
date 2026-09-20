@@ -85,6 +85,23 @@ def tape_rim_dir(side: np.ndarray, axis: np.ndarray) -> np.ndarray:
     return side if n < 1e-6 else u / n
 
 
+def tape_radial(sim: WorkshopSim) -> np.ndarray:
+    """Unit radial direction to the TOP of the ring, in the ring's own plane (follows a lean).
+
+    The tape roll is pinched RADIALLY at its crown: the jaw axis runs along this direction, one
+    pad inside the hole, one on top, pads flat on the 7 mm wall. It replaced a lateral-closing
+    grasp at 45 deg above the equator (TAPE_PHI), which was measured failing on legs 8/25: the
+    26 mm tall pad's upper corner reaches past the wall into the ring's crown, so the pad TIP
+    hit the ring face at ~310 N during the approach (scripts probe, pinned and on legs). A
+    pinned base absorbs that; a standing robot is knocked back 20-40 mm and closes short.
+    Held at the crown the ring already hangs below the grip, so the lift does not swing it."""
+    R = sim.d.xmat[sim.tool_body["tape_roll"]].reshape(3, 3)
+    n = R[:, 2]
+    up = np.array([0.0, 0.0, 1.0])
+    u = up - np.dot(up, n) * n
+    return u / np.linalg.norm(u)
+
+
 def grasp_point(sim: WorkshopSim, name: str) -> np.ndarray:
     """World position of the grasp on a standing tool: on the tool's own long axis at
     GRASP_Z above the rack floor (above the rack plates), following whatever lean the tool
@@ -99,9 +116,7 @@ def grasp_point(sim: WorkshopSim, name: str) -> np.ndarray:
         # every other tool, and the pads closed on nothing in 5 of 8 episodes. TAPE_PHI is the
         # angle up from the equator; at 45 deg the rim point clears the plates by 26 mm and
         # the wall still presents 9.9 mm across a laterally-closing jaw.
-        sh = sim.d.xpos[sim.m.body("arm_link02").id]
-        side = R[:, 1] if (pos - sh)[1] < 0 else -R[:, 1]
-        return pos + tape_rim_dir(side, R[:, 2]) * 0.0415
+        return pos + tape_radial(sim) * 0.0415
     up = -R[:, 0]                              # the tool's +x points down into the slot...
     if up[2] < 0:                              # ...except the screwdriver, which stands
         up = -up                               # handle-down (see stand_quat in workshop.py)
@@ -117,12 +132,19 @@ def plan_grasp(sim: WorkshopSim, ik: ArmIK, name: str, rng: np.random.Generator)
     heading = np.arctan2(gp[1] - sh[1], gp[0] - sh[0])
     q_now = sim.arm_q()[:6]
     best = None
-    for pitch in PITCH:
+    # The tape roll's radial pinch needs a LEVEL approach: the jaw axis is orthogonalised
+    # against the approach, so a pitched approach tilts the pads off the flat crown wall and
+    # they close on an edge (one pad at ~200 N, the other barely touching; pinned 7/12).
+    for pitch in ((0.0,) if name == "tape_roll" else PITCH):
         pitch = pitch + rng.uniform(-0.03, 0.03)
         a = np.array([np.cos(pitch) * np.cos(heading), np.cos(pitch) * np.sin(heading),
                       -np.sin(pitch)])
         lateral = np.array([-np.sin(heading), np.cos(heading), 0.0])
-        for w in (lateral, -lateral):
+        ws = (lateral, -lateral)
+        if name == "tape_roll":
+            r = tape_radial(sim)
+            ws = (r, -r)
+        for w in ws:
             Rg = grasp_rot(a, w)
             site = gp          # symmetric parallel jaw: the ee site IS the grasp centre
             qg, ep, er, ok = ik.solve_multi(sim.d, site, Rg, q_init=q_now)
@@ -167,6 +189,7 @@ def run_grasp(sim: WorkshopSim, ik: ArmIK, name: str, rng: np.random.Generator,
     """
     ph = on_phase if on_phase is not None else (lambda _label: None)
     closed = grip_close_cmd(name)
+    sim.lock_stance()
     ph("plan")
     plan = plan_grasp(sim, ik, name, rng)
     if plan is None:
@@ -247,8 +270,40 @@ def run_grasp(sim: WorkshopSim, ik: ArmIK, name: str, rng: np.random.Generator,
     lifted = sim.gt_tool_pos(name)[2] - z0
     held = sim.held_tool()
     ok = lifted > 0.08 and held == name
+    diag["site"] = [float(v) for v in site]
+    diag["R"] = [[float(v) for v in row] for row in Rg]
+    diag["approach"] = [float(v) for v in a]
     return {"success": bool(ok), "lifted": round(float(lifted), 3), "held": held, **diag,
             "reason": "ok" if ok else ("wrong_object" if held not in (None, name) else "not_held")}
+
+
+def return_to_rack(sim: WorkshopSim, ik: ArmIK, name: str, pick, rng, record=None) -> dict:
+    """Put a held tool BACK in the slot it came from -- the grasp, reversed.
+
+    `pick` is the dict `run_grasp` returned (its `site`, `R` and `approach`). The robot does not
+    move: the slot is right in front of it, so this is the cheapest way to get rid of a tool the
+    person no longer wants (T10 #5). Walking somewhere to put it down is not: the station-to-
+    station hop is 0.6 m sideways, and the policy's sidestep only manages ~0.1 m of it.
+    """
+    sim.lock_stance()
+    site = np.asarray(pick["site"], float)
+    Rg = np.asarray(pick["R"], float)
+    a = np.asarray(pick["approach"], float)
+    grip = float(sim.arm_target[6])
+    q = sim.arm_q()[:6]
+    above = site + np.array([0.0, 0.0, LIFT])
+    back = above - RETREAT * np.array([a[0], a[1], 0.0])
+    q = cartesian(sim, ik, q, sim.ee_pos(), back, Rg, grip, rng.uniform(1.0, 1.3), record)
+    q = cartesian(sim, ik, q, sim.ee_pos(), above, Rg, grip, rng.uniform(1.4, 1.8), record)
+    q = cartesian(sim, ik, q, sim.ee_pos(), site, Rg, grip, rng.uniform(1.6, 2.0), record)
+    sim.move_arm(np.concatenate([q, [grip]]), 0.3, record)
+    op = min(GRIPPER_OPEN, GRASP_HALF_WIDTH[name] + 0.014)
+    sim.move_arm(np.concatenate([q, [op]]), 0.6, record)
+    q = cartesian(sim, ik, q, sim.ee_pos(), site - PRE * a, Rg, op, rng.uniform(1.2, 1.6), record)
+    sim.settle(1.0)
+    standing = sim.gt_tool_pos(name)[2] > rack_floor_z() + 0.02
+    return {"success": bool(sim.held_tool() is None and standing),
+            "held": sim.held_tool(), "pos": [round(float(v), 3) for v in sim.gt_tool_pos(name)]}
 
 
 def _pad_contacts(sim: WorkshopSim, name: str) -> set[str]:
@@ -263,3 +318,22 @@ def _pad_contacts(sim: WorkshopSim, name: str) -> set[str]:
             if sim.m.geom_bodyid[g] in (sim.mover_body, sim.stator_body):
                 out.add(sim.m.geom(g).name or str(g))
     return out
+
+
+STOW_B = np.array([0.26, 0.0, 0.62])     # ee target, BASE frame, walking with a tool. (0.15, 0, 0.52):
+                                         # step-down 7/12 vs 17/20 -- tucking in does not help
+
+
+def stow_arm(sim: WorkshopSim, ik: ArmIK, record=None, duration: float = 1.5) -> np.ndarray:
+    """Pull the held tool in over the body for walking: a CARTESIAN move of the ee to STOW_B
+    (base frame) keeping the grasp orientation -- a joint-space fold re-rolls the wrist and was
+    measured levering tools out of the jaws. Brings the payload's CoM back toward the trunk,
+    for the step down off the walkway on the way to the human."""
+    b = sim.d.qpos[:3].copy()
+    yaw = sim.get_base_yaw()
+    c, s = np.cos(yaw), np.sin(yaw)
+    Rz = np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]])
+    target = b + Rz @ STOW_B
+    R = sim.d.site_xmat[sim.ee_site].reshape(3, 3).copy()
+    grip = float(sim.arm_target[6])
+    return cartesian(sim, ik, sim.arm_q()[:6], sim.ee_pos(), target, R, grip, duration, record)

@@ -171,6 +171,17 @@ def _base_spec() -> mujoco.MjSpec:
     base.add_camera(name="head", pos=[0.33, 0.0, 0.04], fovy=75,
                     xyaxes=[0, -1, 0, math.sin(pitch), 0, math.cos(pitch)])
     base.add_site(name="head_cam_site", pos=[0.33, 0.0, 0.04], size=[0.005, 0, 0], group=4)
+    # Mast RGB for SmolVLA (T6): the head camera sits at bench-panel height and sees only the
+    # bench front / table legs while manipulating, so the VLA's second view is a mast camera
+    # over the arm, pitched down at the bench top (rack and place zones ~0.5 m ahead).
+    # Offset to the right of the arm and yawed in, so the upper arm does not fill the view.
+    pitch, yaw = math.radians(27), math.radians(11)
+    d = [math.cos(pitch) * math.cos(yaw), math.cos(pitch) * math.sin(yaw), -math.sin(pitch)]
+    xa = [d[1], -d[0], 0.0]
+    n = math.hypot(xa[0], xa[1])
+    xa = [xa[0] / n, xa[1] / n, 0.0]
+    ya = [xa[1] * d[2] - xa[2] * d[1], xa[2] * d[0] - xa[0] * d[2], xa[0] * d[1] - xa[1] * d[0]]
+    base.add_camera(name="mast", pos=[-0.10, -0.12, 0.75], fovy=70, xyaxes=xa + ya)
     return go2
 
 

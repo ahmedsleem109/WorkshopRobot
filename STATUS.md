@@ -1,6 +1,6 @@
 # STATUS — "Bring me the 10mm wrench"
 
-Last updated **2026-09-19, end of session 4**. Start with "NEXT SESSION (5)" below the task board. Read this, then `REMAINING.md` for what to do
+Last updated **2026-09-20, session 5 (paused: the D: drive filled up -- see "NEXT SESSION (6)").** Start with "NEXT SESSION (6)" below the task board. Read this, then `REMAINING.md` for what to do
 next (tasks are ordered by dependency there, not by phase).
 
 ---
@@ -27,63 +27,205 @@ of session 3 (2026-09-19).
 ### IN PROGRESS / BELOW THE BAR
 | task | state | next action |
 |---|---|---|
-| **T2.3** place skill | built; transfer **78% (table B) / 80% (table A)** vs the 90% bar. wrench_13mm 13/25; tape to table B 16/25 | fix tools toppling out of the zone: see the START HERE table |
-| **T1** tape_roll per-tool | 21/25 at the 4 s hold (84%) | diagnose with `scripts/grasp_diagnose.py 25 --tool tape_roll` |
-| **T0.4** `vlm.point()` | decided (Qwen + size→colour lookup), **not implemented** | separate process, one-function contract |
-| **T3.5** curriculum L5 run | `payload_l5` (level_init 5) **stopped at 4.59M of 10M steps, never evaluated** (`~/bringwrench/runs/results/2026-09-18_12-19-23-payload_l5`) | resume or re-launch via Scheduled Task, then re-run the height sweep |
+| **T3.5** curriculum L5 run | `payload_l5` (level_init 5) **stopped at 4.59M of 10M steps, never evaluated** | resume, then re-run the height sweep -- this is now the TOP locomotion item: the step DOWN off the walkway with a tool held is the dominant end-to-end failure (session 5) |
+| **T7** SmolVLA fine-tune | data done (1,128 episodes); T7.1 baseline trained + scored (grasp 1/10); the FULL run was killed twice by the full D: drive | free D:, then `ops/train_vla.sh vla_full 6000 16 bw_demos 3000`, then `scripts/eval_vla.py` |
+| **T0.4 / T8** grounding | implemented and scored: locate xy median 13.4 mm, miss 11%, **pliers 0/7** | fix the pliers description; then re-score 32 rendered seeds |
 
-### NOT STARTED (dependency order)
+### STALE SECTIONS BELOW
+"START HERE -- next session" and everything under "SESSION 4" and older describe earlier
+sessions; the board here and "SESSION 5" are authoritative.
+
+### DONE IN SESSION 5
+| task | what it delivered | evidence |
+|---|---|---|
+| **T1/T2.3 on legs** | grasp **125/125**; transfer **120/125 (A) / 124/125 (B)**, every tool >= 92% | "SESSION 5" below |
+| **T5** | controller == MJX element-wise (action diff 1.8e-6) | "## T5 (session 5)" |
+| **T0.4 / T8** | `vlm.point()` + `locate()` behind one contract, scored | "## T0.4 + T8 (session 5)" |
+| **T6** | **1,128 LeRobot v3.0 episodes** (pick + place), instructions paraphrased per episode | `scripts/collect_demos.py`, `scripts/to_lerobot.py` |
+| **T9** | orchestrator state machine, scripted + VLA skill backends | `bw/orchestrator.py` |
+| **T10** | recovery: missing tool, mid-carry drop, ambiguous "wrench" | `scripts/eval_suite.py` |
+| **T11** | end-to-end suite + failure-cause table (scripted skills) | "SESSION 5" below |
+
+### NOT STARTED
 | task | blocked by |
 |---|---|
-| **T5** validate `controller.py` against MJX + `base_mode="policy"` | nothing -- can start now |
-| **T6** demonstration data (LeRobot v2.0) | T2.3 at ≥90% |
-| **T7** SmolVLA fine-tune (the centrepiece) | T6 |
-| **T8** `locate()` (point → depth → 3D, 2-3 views) | T0.4 |
-| **T9** orchestrator (nav / pick / place / recover) | T5, T7, T8 |
-| **T10** recovery scenarios | T9 |
-| **T11** 50-trial evaluation suite | T9, T10 |
-| **T12** video, README, blog, outreach | T11 |
+| **T12** video, README, blog, outreach | the VLA numbers (T7) |
+| T10 scenarios 3 (obstacle replan) and 5 (retarget mid-walk) | nothing -- cut for time, 1/2/4 are done |
 
-**Critical path:** T2.3 → T6 → T7 → T9 → T10 → T11 → T12. T5 and T8 can run in parallel with
-it and must both be done before T9.
+**Critical path left:** T7 (full fine-tune + eval) -> T12. Everything else is measured.
 
 ---
 
-## NEXT SESSION (5) -- execute in this order
+## NEXT SESSION (6) -- start here
 
-Context: walking is solved (214/214 walks, `models/payload_nav_policy.npz`). The pipeline now
-runs with the legs ON THE POLICY (`WorkshopSim.attach_locomotion`), and that is the mode the
-remaining arm work and the data collection must be measured in (`try_place.py 25 --walk`).
+**STOP FIRST: the D: drive is FULL (68 MB free of 318 GB).** That is what killed the first full
+SmolVLA run: WSL's `D:\WSL\Ubuntu\ext4.vhdx` (141 GB) could not grow, the ext4 inside went
+READ-ONLY mid-training, and the distro then refused to start until space was freed. Nothing in
+this repo is the cause -- the big consumers on D: are `D:\WSL` 141 GB, `Adas` 43 GB,
+`humanoid` 30 GB, `openarm_data` 22 GB, `hand` 15 GB. Free **at least ~20 GB on D:** before
+running anything long. (Session 5 freed ~4 GB INSIDE the WSL disk -- the shard datasets, the
+smoke run and the baseline checkpoints -- which is why it runs at all now.)
 
-1. **Tape roll grasp on legs** (8/25 on legs, 21/25 pinned). Diagnose with
-   `grasp_diagnose.py` on a policy-attached sim: base drift during lift (~27 mm) + the ring
-   pinched against a rack plate at close (75-120 N in every failure). Candidate fixes: close
-   with less lateral preload / re-point after the jaws touch; lift-with-retreat. Bar: >=90%.
-2. **Place on legs** -- pliers 19-20/25 outside_zone (24-25/25 pinned), screwdriver 3/25 on A.
-   Measure the base sway during descend/release; re-run `_servo_xy` right before release;
-   consider a longer settle. Bar: every tool >=90% with `--walk`.
-3. **Re-benchmark** `try_grasp.py 25` (pinned) and `try_place.py 25 --walk` on both tables.
-   T2.3 is DONE when every tool is >=90% on legs. Render one clip per table and send it.
-4. **T5 formal check** (small): MJX vs CPU obs/action element-wise for 100 steps
-   (`controller.py`); the functional check is already done (`nav_tracking.py`).
-5. **T0.4 `vlm.point()`** (can run in parallel with 1-3 -- no sim changes): Qwen3-VL-2B,
-   separate process, size -> grip-band colour lookup, `None` when not found.
-6. **T8 `locate()`**: point -> wrist depth -> base frame, 2-3 scan views merged; score median
-   error + miss rate vs ground truth.
-7. **T6 data collection** (needs 3): ~600 pick + ~600 transfer, legs on the policy, paraphrased
-   instructions (`bw/task/language.py`), successes only (`bw/task/spec.py`) -> LeRobot v2.0.
-8. **T7 SmolVLA fine-tune** (needs 7): pick-only baseline -> full run (Kaggle / local LoRA);
-   fixed eval protocol + language-swap test.
-9. **T9 orchestrator** (needs 4, 6, 8): `navigate_to` = `walk_to`, `locate`, `grasp`, `place`,
-   `stow_arm` (Cartesian; joint fold drops the tool), `ask_human`; state machine + gates.
-10. **T10 recovery** (1, 2, 4 first) -> **T11** 50-trial eval + failure table -> **T12** video,
-    README, blog, outreach.
+### 1. Finish T7 -- the only thing on the critical path
+The data is done and the pipeline is proven end to end (collect -> convert -> train -> serve ->
+roll out). What is missing is a trained checkpoint and its numbers.
+```
+bash ops/train_vla.sh vla_full 6000 16 bw_demos 3000    # ~1.8 h at 1.07 s/step, bs 16, 4.5 GB VRAM
+bash ops/vla_server.sh ~/bringwrench/runs/vla_full/checkpoints/last/pretrained_model
+D:\hexapod\render_venv\Scripts\python.exe scripts\eval_vla.py 20 --transfer --swap --out runs\eval\vla_full.json
+```
+- Dataset: `~/bringwrench/data/bw_demos`, **1,128 episodes / ~104k frames**, LeRobot v3.0,
+  feature keys `observation.images.camera1` (wrist) + `camera2` (mast) so `smolvla_base` needs no
+  rename map. Raw episodes are in `D:\bw_data\raw` (1 GB) if it must be re-converted
+  (`bash ops/convert_all.sh`, 8 shards, ~25 min).
+- Reference so far: **T7.1 pick-only baseline** (120 episodes, 2,000 steps, loss 0.67 -> 0.060)
+  scored **grasp 1/10** on held-out seeds -- the pipeline works; the data scale was the point.
+  The full run reached loss ~0.19 at step 2,000 before the disk died; two runs were lost to it.
+- The eval protocol is FIXED and written (`scripts/eval_vla.py`): held-out seeds (the collector
+  used `rng(10_000_019 + seed)`, the eval uses `1000*seed + tool`), all five tools present, and
+  grasp / correct-object / transfer / language-swap reported separately. T7.4 (checkpoint
+  selection on the eval metric) needs two checkpoints scored on the same seeds -- note the GPU
+  cannot train and serve at once (exclusive mode) and CPU inference is ~50 s per action chunk,
+  so plan on alternating.
+- Then run the end-to-end suite with the VLA in place of the demonstrator:
+  `scripts\eval_suite.py --suite all --n 10 --backend vla`, and compare with the scripted numbers.
 
-Loose ends, when convenient: T3.5 step-height run (stopped 4.6M, never evaluated); render
-`media/loco_payload.npz`; the push-ablation anomaly (do not publish that table until explained);
-the GPU clock cap lapses on driver re-init (guard at 88 C works).
+### 2. The dominant failure is LOCOMOTION, not manipulation -- resume T3.5
+13 of the 16 end-to-end failures are the base falling, almost all on the 12 cm step DOWN off the
+walkway while carrying a tool (bring-me 25/30). The step curriculum run `payload_l5` stopped at
+4.59M of 10M steps and was never evaluated. Resume it, re-run the height sweep, then re-measure
+the bring-me suite. Already tried and measured, do not repeat: `stow_arm()` (needed, kept), a
+via-waypoint past the step so it is not crossed at creep speed (17/20, vs 16/24 crossing at full
+speed), tucking the tool further in (0.15, 0, 0.52) -> 7/12, clockwise-only turns (needed).
 
----
+### 3. Grounding: the pliers hole
+`locate()` is at 13.4 mm median xy error but **0/7 on the pliers** -- Qwen3-VL-2B answers "There
+are none." to "pliers" in 11 of 17 visible views. Same fix pattern as the wrenches: describe a
+visible feature in `ALIASES` ("red pliers"), then re-score. 32 already-rendered seeds are waiting
+in `runs/t8_views` (`vlm_replay.py runs\t8_views --start 8`, then `score_locate.py`). The server
+now takes `--device cpu` when the GPU is busy. Also re-time nf4 (1.66 GB) on an idle machine: the
+full pipeline needs the VLM and SmolVLA co-resident on 6 GB.
+
+### 4. Smaller open items
+- **S3 obstacle recovery does not work** (0/2): the blockage is detected and a detour planned, but
+  the navigator cannot free the base from contact with the box. Needs a local planner.
+- S5 retarget is 16/20; the 3 losses are the returned tool or its neighbour knocked over in the
+  rack by `return_to_rack()`, after which it lies below the plate tops and `locate` cannot see it.
+- 3 transfers in 30 put the tool outside the zone (the tail of the place distribution).
+- ~12 raw episodes are corrupt (collector workers killed mid-write); conversion skips them.
+- T12: `README.md` and `docs/blog.md` are drafted and need the VLA numbers; the 90 s montage is
+  not cut yet (clips: `media/bring_10mm_wrench_small.mp4`, `recover_drop_small.mp4`,
+  `transfer_side_table_small.mp4`).
+
+## SESSION 5 (2026-09-20) -- everything on legs; T6 collected; orchestrator + eval suite
+
+### 1. Grasp on legs: 8/25 -> 125/125 (the tape roll was a GEOMETRY bug, not a control bug)
+With the legs on the walking policy the standing base is NOT a fixed frame. Two measurements:
+- Reaching in pushes the base back **25-35 mm** (`grasp_diagnose.py --walk` logs base xy now).
+- The tape roll's failures started BEFORE the close: gripping the rim at 45 deg above the
+  equator (TAPE_PHI) with a laterally-closing jaw puts the pad's upper corner into the ring's
+  crown, so the **pad TIP hit the ring at ~310 N during the approach**, knocking the ring over
+  or shoving the whole robot back.
+**Fix:** grasp the ring RADIALLY at its crown -- jaw axis along the ring's radius, one pad
+inside the hole, pads flat on the 7 mm wall (`tape_radial()`), with a LEVEL approach only
+(a pitched approach tilts the pads off the flat crown; pinned 7/12 with pitch, 12/12 without).
+Held at the crown the ring also hangs under its grip point, so the lift no longer swings it.
+- A closed-loop ee re-servo before the close was tried and REJECTED: with a compliant base it
+  chases the contact it is making (base pushed back 150-250 mm, 3/6).
+- A joint-PD "stand lock" for the legs during manipulation (`Locomotion.lock_stance`, what a
+  real Go2's balance-stand does) is IN and used by grasp/place; `walk_to` unlocks.
+
+| grasp, 25 seeds/tool, legs on the policy (`try_grasp.py 25 --walk`) | |
+|---|---|
+| wrench_10mm / wrench_13mm / screwdriver / pliers | 25/25 each |
+| tape_roll | 25/25 (also 25/25 with +-3 cm / +-6 deg base jitter, the walk's own stopping spread) |
+
+### 2. Place on legs: every tool >= 92%, both tables
+The screwdriver was 16/25 on table A. Cause, from the phase trace: `place_rolls()` rolls the
+wrist so the tool "hangs down", which for a handle-gripped screwdriver means **flipping it 180
+deg and standing it on its SHAFT TIP** -- it toppled 100-160 mm every time. Fixes:
+- `STAND_UPRIGHT = {"screwdriver"}`: place it upright, handle down, the way it stood in the rack;
+  no topple-aim shift. (Laying it flat is out of IK reach at the place station; a 45 deg tilt
+  left the handle leaning on a pad and the back-off dragged it ~190 mm out of the zone.)
+- For those tools the retract goes UP first, then back.
+
+| transfer on legs (`try_place.py 25 --walk --table X`) | table A | table B |
+|---|---|---|
+| wrench_10mm | 25/25 | 25/25 |
+| wrench_13mm | 23/25 | 25/25 |
+| screwdriver | 24/25 | 25/25 |
+| pliers | 23/25 | 24/25 |
+| tape_roll | 25/25 | 25/25 |
+| **total** | **120/125 (96%)** | **124/125 (99%)** |
+
+### 3. T6 -- 1,128 demonstration episodes (LeRobot **v3.0**, not v2.0)
+`scripts/collect_demos.py` runs the full transfer on legs and saves up to two episodes per run:
+`pick` (instruction from PICK_TEMPLATES) and `place` (TRANSFER_TEMPLATES), successes only, judged
+by `bw/task/spec.py`. Per 10 Hz tick: **wrist + mast RGB 256x256**, arm state (7) and the
+commanded target (7). Randomised: tool subset/slots/lean/flip, lighting, rack colour, base pose
+(+-3 cm / +-6 deg), scan pose (+-0.05 rad), destination table, phrasing.
+- A **mast camera** was added to the robot (`build_models.py`): the head camera sits at bench-panel
+  height and sees only the bench front / table legs while manipulating.
+- 600 runs, 3 parallel Windows sims, ~28 s per run. 598 picks + 540 places kept; ~12 raw videos
+  were corrupted by killed workers and are skipped at conversion.
+- `scripts/to_lerobot.py` converts (8 parallel shards + `aggregate_datasets`; H.264 instead of
+  lerobot's SVT-AV1 default, which cost ~16 s per episode). Result: **1,128 episodes / ~104k
+  frames**, features named `observation.images.camera1|camera2` so `lerobot/smolvla_base` needs
+  no rename map. lerobot 0.6.1 writes dataset **v3.0** -- the plan's "v2.0" is the older layout.
+
+### 4. T9 orchestrator + T10 recovery + T11 suite
+`bw/orchestrator.py`: parse -> NAV_RACK -> LOCATE -> GRASP -> [STOW] -> NAV_DEST -> PLACE|HANDOFF.
+Every transition is on an OBSERVABLE gate (walk_to's own verdict, locate returned a point,
+`gripper_state() == "holding"`, gripper empty after release); bounded retries; skills are
+pluggable (`backend="scripted"|"vla"`, `grounding="vlm"|"oracle"`). Grounding picks the tool:
+the scripted grasp is aimed at whichever tool the located point is nearest, so a grounding error
+shows up as a wrong-object failure, as it would on hardware.
+- **Handoff**: the tray is now on a **0.45 m stand** (`HANDOFF_Z`), not the floor -- with a level
+  grip the arm cannot get below ~0.5 m over a tray 0.55 m ahead, so a floor tray meant a 0.5 m
+  drop (screwdriver bounced out, tape stayed hooked on a finger). The move to the tray is
+  JOINT-space to a multi-start IK solution: a Cartesian line from the stow pose sent the
+  incremental IK onto another branch and pulled the arm back 0.3-0.4 m.
+- **Route to the human** crosses the 12 cm step DOWN off the walkway. It needs `stow_arm()`
+  (Cartesian pull-in, `STOW_B`) and a via-waypoint at x=0.3 so the step is not crossed at creep
+  speed: 17/20 walks reach the human; crossing at full speed (via x=-0.3) is worse, 16/24, and
+  tucking the tool further in (0.15, 0, 0.52) is worse again, 7/12. Left turns at the rack fell
+  3/3 (mirrored policy), so the route turns clockwise only (`turn_sign=-1`).
+
+**T11, scripted skills + oracle grounding (`scripts/eval_suite.py`), 130 trials:**
+| suite | success | failure causes |
+|---|---|---|
+| transfer (pick -> walk -> place in the named zone) | **27/30 (90%)** | 3 placed outside the zone |
+| bring-me (pick -> walk to the human -> handoff) | **25/30 (83%)** | 5 falls on the step down |
+| missing tool (S1: absent, must report and deliver nothing) | **20/20 (100%)** | -- |
+| mid-carry drop (S2: jaws opened mid-walk, human returns it) | **26/30 (87%)** | 4 falls on the outbound walk (3 were tagged `nav_rack_failed`: the robot had already fallen, so the recovery started from a fallen base -- the attribution is fixed in `bw/orchestrator.py`, the outcome is not) |
+| ambiguous "wrench" (S4: must ask, then deliver the answer) | **16/20 (80%)** | 4 falls on the step down |
+| retarget (S5: "actually, the 13mm" after the first tool is in the jaws) | **16/20 (80%)** | 3 lost the second tool after the return-to-rack, 1 fall |
+| obstacle (S3: a box appears on the route to table B) | **0/2 -- does NOT work** | the blockage IS detected and a detour is planned, but the navigator cannot extract the base from contact with the box |
+| **total (the five working suites)** | **130/150 (87%)** | walking 14, placement 3, lost tool 3 |
+
+**S5 (retarget)** needed a skill the plan did not list: `return_to_rack()`, the grasp played
+backwards, because the robot has to get rid of the tool it is holding before fetching another
+one, and it cannot walk anywhere useful to put it down -- the station-to-station hop is 0.6 m
+sideways and the policy's sidestep only manages ~0.1 m of it (measured). Putting the tool back in
+its own slot works 16/20; the 3 losses are the returned tool or its neighbour being knocked over,
+after which it lies below the rack plates and `locate` cannot see it.
+
+**S3 (obstacle) is an honest failure.** `navigate_to_replan()` detects the stall, backs off and
+plans a detour around the straight line, and the robot still cannot get free: it ends wedged
+against the box or falls. A local planner (or any obstacle perception at all) is missing; the
+code path is in `bw/orchestrator.py` and the scenario is in the suite, both marked as not working.
+
+Median wall clock per layer: locate 2.2 s, grasp 6.3 s, walk 5-10 s, place 4.2 s; median 54 s of
+simulated time per trial. **The dominant end-to-end failure is locomotion, not manipulation**:
+13 of the 16 failures are the base falling, almost all of them on the step DOWN off the walkway
+with a tool held. That is exactly what the unfinished T3.5 step curriculum is for.
+
+### 5. Other fixes
+- `locate()`'s `NEAR_CLIP` was 0.25 m, which also rejected tools at the rack ends -- they sit
+  0.22 m from the wrist lens. Now 0.16 m (the gripper reads 0.105 m median).
+- `try_place.py --walk` now scores with the shared `evaluate()`, like the teleport path.
+- `try_grasp.py` gained `--walk`, `--tool`, `--jitter`; `grasp_diagnose.py` gained `--walk` and
+  logs the base pose.
 
 ## SESSION 4 (2026-09-19) — the base WALKS between tables; T2.3 at 95-96%
 
@@ -680,3 +822,107 @@ PYTHONPATH=/mnt/d/bringwrench:$HOME/go2-stairs ~/go2-stairs/.venv/bin/python -m 
     --checkpoint ~/go2-stairs/results/2026-08-06_17-17-05-stairs_run7/checkpoints/final --arm random
 D:\hexapod\render_venv\Scripts\python.exe scripts\render_traj.py --traj media\loco.npz
 ```
+
+## T5 (session 5)
+
+**T5 part 1 PASSES: `controller.py` matches the MJX env + brax inference element-wise.** No
+changes to `controller.py`. Script: `scripts/t5_obs_check.py` (WSL, `JAX_PLATFORMS=cpu`, ~1.5 min),
+`models/payload_nav_policy.npz` vs its checkpoint `payload_nav3/checkpoints/step_8110080`,
+DR/noise/latency/pushes off, arm stowed, 100 steps of forward 0.5 / turn R 0.6 / back 0.25 / side L 0.2.
+- Weights: re-export of the checkpoint == the .npz (diff 0). Default pose / default ctrl / ctrl
+  range on `workshop.xml` vs the MJX model: <= 5e-8; dt, obs scales, clip, action scale, history equal.
+- Teacher-forced (MJX state copied into CPU MjData each tick; controller builds its own 5-frame
+  history and action), max abs diff over 100 steps x 5 frames: lin_vel 0, proj_grav 7e-9, gyro 0,
+  accel 1.2e-7, joint_pos 6e-8, joint_vel 1.5e-8, last_action 1.8e-6, command 0;
+  **action 1.8e-6** (bar 1e-5). Float32 rounding only; ordering (last_lin_vel lag) is correct.
+- Closed loop (each on its own physics, same start): action diff 3e-7 at step 1, 9e-4 at 10,
+  ~1e-2 at 50-100; base xy 1.7 mm apart after 2 s. That is MJX-vs-CPU solver drift, not the controller.
+- Caveats: `Locomotion.reset()` always starts from a zero command (the check aligns the MJX reset
+  frame to that); left-turn mirroring is a deliberate deployment deviation and was disabled here.
+- Still open in T5: part 2 (`base_mode="policy"` standing still under zero command during a grasp).
+
+---
+
+## T0.4 + T8 (session 5)
+
+**Files (new, uncommitted):** `bw/perception/vlm_server.py` (the model process, WSL torch venv),
+`bw/perception/vlm.py` (client + `point()` contract, stdlib+numpy only), `bw/perception/locate.py`
+(`locate()`), `scripts/bench_locate.py` (Windows: live sim -> scan -> model), `scripts/vlm_replay.py`
+(re-query stored views), `scripts/score_locate.py` (numpy-only scorer, all variants offline).
+Data: `runs/t8_views` (40 seeds rendered, **8 scored** with bf16), `runs/t8_views_nf4` (2 seeds, nf4),
+`runs/t8_smoke` (2 seeds, the rejected "reply none" prompt).
+
+**Contract.** `vlm.point(image_rgb, query) -> (u, v) | None`. The model runs in its own process
+(HTTP on :8765, raw RGB bytes in JSON); `vlm.ensure_server()` starts it via `wsl.exe` from Windows
+or directly in WSL; Windows -> WSL localhost forwarding works. `point()` does:
+1. `resolve_query`: "10mm wrench" -> "wrench with the blue grip band", 13mm -> red (T0.3 decision).
+2. coarse point on the full 512 image (T0.3 prompt, 0-1000 normalised).
+3. **refine**: 160 px crop around it, 3x upscaled, ask again, map back. Median distance to the
+   target's pixels 11.8 px -> **2.7 px**; locate success 28% -> 50% (before the merge fix below).
+4. (optional `verify=True`: yes/no on the crop -- measured, it COSTS recall (false None 23% -> 32%)
+   and did not reject any hallucination on absent tools, so it is off.)
+
+`locate(sim, "10mm wrench")` pans `arm_joint1` over (0, +0.35, -0.35) from `SCAN_Q`, points in each
+view, back-projects through the wrist depth using the robot's own FK camera pose, and merges.
+Two things mattered, both measured on the same 8 seeds:
+- **Depth snap to foreground.** A pixel beside a thin tool reads the BENCH depth and lands 10-30 cm
+  too far along the ray. `snap_foreground` moves the answer to the nearest pixel >=3 cm in front of
+  the local background (80th pct depth in 81x81 px). xy error median 67.8 mm (window-percentile
+  depth) -> 25.9 mm.
+- **Merge tie-break.** When the 3 views disagree (all clusters of 1), prefer the view whose answer
+  already sat ON an object (smallest snap distance). xy median 25.9 -> **13.4 mm**, success 50 -> 64%.
+
+**Results, bf16, 8 seeds x 3 views x 5 queries = 120 queries (every tool asked in every view, present
+or not), 36 present tool instances.** Run under heavy CPU/GPU contention (the other agent's 12
+render processes), so latency is pessimistic.
+
+| T0.4 `point()` per view | |
+|---|---|
+| lands on the target (<=3 px of its GT segmentation) | 37/93 visible (39.8%); median px distance to target **2.7 px**, p75 20.5 |
+| lands on a different tool | 6/93 (6.5%) |
+| false None on a visible target | 21/93 (22.6%) -- almost all **pliers (11/17) and tape (7/21)** |
+| 10 vs 13 mm when both visible and it landed on a wrench | 14/18 (77.8%) |
+| correct None on absent tools | 6/12 (50%) -- the model hallucinates a point half the time |
+| latency | 2 model calls; **uncontended ~0.7-0.8 s per call** (smoke run), contended median 2.9 s / point() |
+| VRAM | bf16 **4.27 GB**; nf4 **1.66 GB** |
+
+| T8 `locate()` per (seed, tool) | |
+|---|---|
+| miss rate (present -> None) | **4/36 (11.1%)** (3 pliers, 1 tape) |
+| horizontal (xy) error vs GT body | **median 13.4 mm**, p75 52.9, p90 345 |
+| distance to the target's visible surface | **median 1.8 mm**, p75 20.1 |
+| 3D error vs GT body origin | median 79 mm -- mostly Z: the model points at the TOP of a standing tool, the body origin is mid-height. Use xy + known rack/table height for grasping |
+| found, nearest tool is the target, xy < 30 mm | **23/36 (63.9%)** |
+| per tool | wrench_10mm 6/7 right, 9.9 mm; wrench_13mm 6/7, 13.2 mm; screwdriver 6/7, 2.6 mm; tape 7/8 found, 25.7 mm (xy vs the RING CENTRE; surface error ~1 mm); **pliers 0/7 right** |
+| false positive (absent tool -> a point) | 3/4 |
+
+**nf4 (2 seeds only, same views; the coordinator asked for it):** 1.66 GB VRAM; locate xy median
+43.6 mm vs 32.8 mm bf16 on the SAME 2 seeds, success 4/9 both, false-None 3/22 vs 6/22. Too few to
+separate accuracy; **latency is ~4x worse** (single call 9.5-10.6 s vs 2-5 s for bf16 under the same
+contention; 16.9 s median per point()). If VRAM forces nf4 next to SmolVLA, re-measure latency on an
+idle machine before deciding; 8-bit is the untested middle.
+
+**Open problems (ordered):**
+1. **Pliers are not recognised** ("There are none." on 11/17 visible; 0/7 located). The primitive
+   red V geometry does not read as pliers. Same fix pattern as the wrenches: a visible-feature
+   description in `ALIASES` (e.g. "red pliers") -- an ablation was started and not finished.
+2. **"red grip band" vs the red pliers**: the 13 mm query sometimes lands on the pliers (both red).
+   Try "silver wrench with a red band on the handle".
+3. **Absent-tool hallucination** (3/4 false positives in locate, 50% per view). Verify-on-crop did
+   not fix it. Candidates: require >=2 agreeing views before returning a point; or a colour check.
+4. Only **8 seeds** scored for bf16 (the GPU was shared; stopped on request). 32 more seeds are
+   already rendered in `runs/t8_views` -- `vlm_replay.py runs/t8_views --start 8` then re-score.
+
+**How to run**
+```
+# model process (WSL; or let vlm.ensure_server() start it from Windows)
+~/bringwrench/.venv-vla/bin/python /mnt/d/bringwrench/bw/perception/vlm_server.py [--quant nf4]
+# render + GT (Windows), then query the model, then score (any venv)
+D:\hexapod\render_venv\Scripts\python.exe scripts\bench_locate.py 40 --no-vlm --out runs\t8_views
+D:\hexapod\render_venv\Scripts\python.exe scripts\vlm_replay.py runs\t8_views [--n 8]
+D:\hexapod\render_venv\Scripts\python.exe scripts\score_locate.py runs\t8_views [--stage coarse|fine] [--no-verify] [--mode snap|pct]
+# or all-in-one live: scripts\bench_locate.py N  (renders, calls point_ex, saves replies)
+```
+In code: `from bw.perception.locate import locate; L = locate(sim, "10mm wrench")` ->
+`L.world`, `L.base` (base frame), `L.n_views`, or `None`. STOP the server when done
+(`pkill -f 'perception/vlm_server[.]py'`) -- it holds 4.3 GB (bf16).

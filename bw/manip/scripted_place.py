@@ -58,6 +58,13 @@ PLACE_JITTER = 0.020            # m: aim scatter inside the zone; swept, see pla
 # the centre, a 95 mm topple leaves 5 mm of a 100 mm half-zone: that was 24 of the 53
 # transfer failures. Shifting the aim by about half the topple centres BOTH outcomes.
 PLACE_AIM_SHIFT = 0.045         # m, along the approach axis, away from the robot
+# Tools placed STANDING UPRIGHT, the way they stood in the rack (handle down), instead of hung
+# straight down from the jaws. The screwdriver stands handle-down and is gripped on the handle,
+# so "hang it down" flipped it 180 deg and stood it on its SHAFT TIP: it toppled every time,
+# ~100-160 mm either way, 16/25 in the zone on legs (table A). Upright: 24/25 (A), 25/25 (B).
+# (A 45 deg tilt, then laying it flat, were tried first: flat is out of IK reach, and the tilted
+# handle stayed leaning on a pad and was dragged out of the zone by the back-off.)
+STAND_UPRIGHT = {"screwdriver"}
 PLACE_CLEAR = 0.004             # m: tool's lowest point above the table at release
 PLACE_LIFT = 0.16               # m: height of the pre-place waypoint above the release pose
 PLACE_RETRACT = 0.12            # m: up, AFTER backing off (see run_place)
@@ -141,6 +148,10 @@ def place_rolls(sim: WorkshopSim, name: str):
     n = float(np.linalg.norm(v))
     if n < 1e-4:
         return [0.0, np.pi / 2, -np.pi / 2, np.pi]
+    if name in STAND_UPRIGHT:
+        theta = np.arctan2(-v[2] / n, v[1] / n) + np.pi       # tool ABOVE the jaws: upright
+        return [theta, theta + np.radians(15), theta - np.radians(15), theta + np.radians(30),
+                theta - np.radians(30)]
     uy, uz = v[1] / n, v[2] / n
     # grasp_rot puts ee +y DOWN, so "tool below the gripper" means the rolled v has a
     # positive ee-y component and no ee-z component: tan(theta) = -uz/uy.
@@ -174,8 +185,9 @@ def plan_place(sim: WorkshopSim, ik: ArmIK, name: str, table: str, rng):
     # ... and aim PLACE_AIM_SHIFT PAST the centre, away from the robot: the topple has a
     # direction (see PLACE_AIM_SHIFT).
     h0 = np.arctan2(zy - sh[1], zx - sh[0])
-    tx = zx + PLACE_AIM_SHIFT * np.cos(h0) + rng.uniform(-PLACE_JITTER, PLACE_JITTER)
-    ty = zy + PLACE_AIM_SHIFT * np.sin(h0) + rng.uniform(-PLACE_JITTER, PLACE_JITTER)
+    shift = 0.0 if name in STAND_UPRIGHT else PLACE_AIM_SHIFT      # standing on its handle: no topple aim
+    tx = zx + shift * np.cos(h0) + rng.uniform(-PLACE_JITTER, PLACE_JITTER)
+    ty = zy + shift * np.sin(h0) + rng.uniform(-PLACE_JITTER, PLACE_JITTER)
 
     heading = np.arctan2(ty - sh[1], tx - sh[0])
     a = np.array([np.cos(heading), np.sin(heading), 0.0])      # horizontal approach
@@ -233,6 +245,7 @@ def run_place(sim: WorkshopSim, ik: ArmIK, name: str, table: str, rng,
     """Place the held tool inside `table`'s marked zone. Assumes the tool IS held."""
     ph = on_phase if on_phase is not None else (lambda _l: None)
     ph("place_plan")
+    sim.lock_stance()
     if sim.held_tool() != name:
         return {"success": False, "reason": "not_holding"}
     plan = plan_place(sim, ik, name, table, rng)
@@ -264,7 +277,7 @@ def run_place(sim: WorkshopSim, ik: ArmIK, name: str, table: str, rng,
     # shift pushed them further out. Nearly vertical (< ~1 deg) -> keep the prior.
     # The tape roll is excluded: a ring has no long axis to lean, and it does not topple.
     lean = _lean_xy(sim, name)
-    if name != "tape_roll" and 0.015 < np.linalg.norm(lean) < 0.5:
+    if name != "tape_roll" and name not in STAND_UPRIGHT and 0.015 < np.linalg.norm(lean) < 0.5:
         zx, zy = PLACE_ZONE[table]
         jit = np.array(plan["target"]) - (np.array([zx, zy]) + PLACE_AIM_SHIFT * a[:2])
         tgt = np.array([zx, zy]) - PLACE_AIM_SHIFT * lean / np.linalg.norm(lean) + jit
@@ -280,7 +293,9 @@ def run_place(sim: WorkshopSim, ik: ArmIK, name: str, table: str, rng,
     ph("place_descend")
     q = _descend_to_contact(sim, ik, name, q, p_rel, R, grip, record)
     sim.move_arm(np.concatenate([q, [grip]]), 0.3, record)
-    diag = {"align_err_mm": round(1000 * float(np.linalg.norm(
+    lean_rel = _lean_xy(sim, name)
+    diag = {"lean_xy": [round(float(x), 3) for x in lean_rel],
+            "align_err_mm": round(1000 * float(np.linalg.norm(
                 sim.gt_tool_pos(name)[:2] - np.array(plan["target"]))), 1),
             "target": [round(v, 3) for v in plan["target"]],
             "touched": _on_table(sim, name), "align_before_mm": round(1000 * diag_repoint, 1),
@@ -294,11 +309,17 @@ def run_place(sim: WorkshopSim, ik: ArmIK, name: str, table: str, rng,
     # it -- measured, the ring ended 94 mm above the table (~= PLACE_RETRACT) in 4 of 4
     # episodes, still hanging on a finger.
     ph("place_retract")
-    back = sim.ee_pos() - PLACE_BACKOFF * np.array([a[0], a[1], 0.0])
-    q = cartesian(sim, ik, q, sim.ee_pos(), back, R, GRIPPER_OPEN, rng.uniform(0.8, 1.1),
-                  record)
-    up = sim.ee_pos() + np.array([0.0, 0.0, PLACE_RETRACT])
-    q = cartesian(sim, ik, q, sim.ee_pos(), up, R, GRIPPER_OPEN, rng.uniform(0.8, 1.1), record)
+    # ...EXCEPT a STAND_UPRIGHT tool: the tilted variant left the handle leaning on a pad after the
+    # jaws open, and backing off first dragged the screwdriver ~190 mm toward the robot, out of
+    # the zone (measured on legs, table A). Up first clears the jaws off the handle, then back.
+    moves = [("back", PLACE_BACKOFF), ("up", PLACE_RETRACT)]
+    if name in STAND_UPRIGHT:
+        moves.reverse()
+    for kind, dist in moves:
+        d = (np.array([0.0, 0.0, dist]) if kind == "up"
+             else -dist * np.array([a[0], a[1], 0.0]))
+        q = cartesian(sim, ik, q, sim.ee_pos(), sim.ee_pos() + d, R, GRIPPER_OPEN,
+                      rng.uniform(0.8, 1.1), record)
 
     # VERIFY, not recorded: the tool must still be in the zone after the arm has gone.
     # "Stable for 2 s" is read as AT REST AT THE END, not as having never moved: a tool
@@ -328,3 +349,67 @@ def run_place(sim: WorkshopSim, ik: ArmIK, name: str, table: str, rng,
             **diag,
             "reason": "ok" if ok else ("outside_zone" if not inside else
                                        ("still_held" if not empty else "not_settled"))}
+
+
+HANDOFF_STATION = None           # set below from the scene layout
+HANDOFF_CLEAR = 0.03             # m: the tool's lowest point above the tray at release
+
+
+def handoff_station():
+    """Base pose that serves the human's handoff tray: 0.55 m in front of it, facing +y, so the
+    walk arrives heading straight at it (no final in-place LEFT turn, which is the mirrored
+    policy's weak case) after crossing the walkway step head-on (see bw/orchestrator.py)."""
+    from bw.sim.workshop import HANDOFF_TRAY
+    return (HANDOFF_TRAY[0], HANDOFF_TRAY[1] - 0.55, np.pi / 2)
+
+
+def in_handoff_tray(pos) -> bool:
+    from bw.sim.workshop import HANDOFF_TRAY, HANDOFF_Z
+    return (abs(pos[0] - HANDOFF_TRAY[0]) <= 0.20 and abs(pos[1] - HANDOFF_TRAY[1]) <= 0.16
+            and HANDOFF_Z - 0.01 < pos[2] < HANDOFF_Z + 0.12)
+
+
+def run_handoff(sim: WorkshopSim, ik: ArmIK, name: str, rng, record=None) -> dict:
+    """Hand the held tool to the human: lower it over the handoff tray on the floor, open,
+    back away. Success = the tool is resting inside the tray."""
+    from bw.sim.workshop import HANDOFF_TRAY, HANDOFF_Z
+    sim.lock_stance()
+    if sim.held_tool() != name:
+        return {"success": False, "reason": "not_holding"}
+    R = sim.d.site_xmat[sim.ee_site].reshape(3, 3).copy()
+    grip = float(sim.arm_target[6])
+    # aim the TOOL (not the ee) at the tray centre: it hangs off-centre in the jaws
+    off = sim.gt_tool_pos(name) - sim.ee_pos()
+    q = sim.arm_q()[:6]
+    # Lowest REACHABLE release over the tray, keeping the grasp orientation (re-orienting the
+    # wrist with a tool in the jaws levers it out). Measured: from this station a level
+    # gripper cannot get below ~0.5 m over the tray, so the tool is dropped from there.
+    tgt, reach_err = None, None
+    R_rel = R.T @ sim.d.xmat[sim.tool_body[name]].reshape(3, 3)
+    low = HANDOFF_Z + HANDOFF_CLEAR - tool_lowest_dz(sim, name, R @ R_rel) - off[2]
+    for z in np.arange(low, 1.2, 0.03):
+        cand = np.array([HANDOFF_TRAY[0] - off[0], HANDOFF_TRAY[1] - off[1], z])
+        q_t, ep, _, ok = ik.solve_multi(sim.d, cand, R, q_init=q)
+        if ok and ep < 0.01:
+            tgt, reach_err = cand, float(ep)
+            break
+    if tgt is None:
+        return {"success": False, "reason": "handoff_ik_fail"}
+    # JOINT-space to the multi-start solution: a Cartesian line from the stow pose makes the
+    # incremental IK wander onto another branch and pull the arm back toward the body (the
+    # tool ended 0.3-0.4 m short of the tray, measured).
+    sim.move_arm(np.concatenate([q_t, [grip]]), rng.uniform(1.8, 2.3), record)
+    q = q_t
+    sim.move_arm(np.concatenate([q, [grip]]), 0.3, record)
+    sim.move_arm(np.concatenate([q, [GRIPPER_OPEN]]), 0.6, record)
+    # back off along the approach first (a finger sits inside the tape roll's hole), then up
+    a = R[:, 0].copy()
+    a[2] = 0.0
+    a /= max(np.linalg.norm(a), 1e-6)
+    q = cartesian(sim, ik, q, sim.ee_pos(), sim.ee_pos() - PLACE_BACKOFF * a, R,
+                  GRIPPER_OPEN, 0.9, record)
+    sim.settle(HOLD_VERIFY)
+    p = sim.gt_tool_pos(name)
+    ok = in_handoff_tray(p) and sim.held_tool() is None
+    return {"success": bool(ok), "reason": "ok" if ok else "missed_tray",
+            "pos": [round(float(x), 3) for x in p], "reach_err_mm": round(1000 * reach_err, 1)}

@@ -115,7 +115,10 @@
     <site name="zone_table_b_center" pos="2.700 -2.050 0.750" size="0.01" group="4"/>
 
     <!-- handoff: a low tray on the floor in front of the human -->
-    <body name="handoff" pos="-0.25 1.8 0">
+    <body name="handoff_stand" pos="-0.25 1.8 0">
+      <geom type="box" size="0.17 0.13 0.223" pos="0 0 0.223" rgba="0.35 0.3 0.25 1" contype="7" conaffinity="7"/>
+    </body>
+    <body name="handoff" pos="-0.25 1.8 0.45">
       <geom name="handoff_floor" type="box" size="0.2 0.16 0.004" pos="0 0 0.004" rgba="0.2 0.55 0.25 1" contype="7" conaffinity="7"/>
       <geom type="box" size="0.2 0.006 0.02" pos="0 0.16 0.02" rgba="0.2 0.55 0.25 1" contype="7" conaffinity="7"/>
       <geom type="box" size="0.2 0.006 0.02" pos="0 -0.16 0.02" rgba="0.2 0.55 0.25 1" contype="7" conaffinity="7"/>

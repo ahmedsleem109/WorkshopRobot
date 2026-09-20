@@ -121,6 +121,7 @@ class Locomotion:
         self.base = model.body("base").id
         self.mirror_when = lambda cmd: cmd[2] >= 0.3 and abs(cmd[0]) < 0.05 and abs(cmd[1]) < 0.05
         self.mirrored = False
+        self.locked = None
         self.reset()
 
     # -------------------------------------------------------------- interface
@@ -136,6 +137,21 @@ class Locomotion:
         self.command = np.array([np.clip(vx, *self.vx_range), np.clip(vy, *self.vy_range),
                                  np.clip(wz, *self.wz_range)])
 
+    def lock_stance(self, on: bool = True):
+        """Stand-lock for manipulation: hold the legs at the policy's last standing targets (joint PD
+        only, feet on the ground by friction) instead of running the policy -- the same thing
+        the real Go2's balance-stand mode does while the arm works. MEASURED: under the policy
+        the arm's reach and pull push the standing base back 25-260 mm (it steps away from the
+        load), so the jaws arrive short or the tool is dragged against the rack. Unlocking
+        restarts the policy from a still stance with a fresh observation history."""
+        if on:
+            self.command = np.zeros(3)
+            self.locked = self.d.ctrl[:N_LEG].copy()     # the policy's standing targets (they
+                                                         # carry its gravity offsets; qpos sags)
+        elif self.locked is not None:
+            self.locked = None
+            self.reset()
+
     def get_base_pose(self) -> SE3:
         return SE3(self.d.qpos[:3].copy(), self.d.qpos[3:7].copy())
 
@@ -148,6 +164,9 @@ class Locomotion:
     # ----------------------------------------------------------- control loop
     def pre_physics(self):
         """Compute a_k from the latest observation and write leg ctrl."""
+        if self.locked is not None:
+            self.d.ctrl[:N_LEG] = self.locked
+            return
         self.mirrored = bool(self.mirror_when(self.command))
         if self.mirrored:
             h = self.hist.reshape(self.history_len, self.frame)

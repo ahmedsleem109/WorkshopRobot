@@ -127,6 +127,7 @@
       <site name="head_cam_site" pos="0.33 0 0.04" group="4"/>
       <camera name="track" pos="0.846 -1.465 0.916" quat="0.791164 0.554139 0.148485 0.211997" mode="trackcom"/>
       <camera name="head" pos="0.33 0 0.04" quat="0.579228 0.40558 -0.40558 -0.579228" fovy="75"/>
+      <camera name="mast" pos="-0.1 -0.12 0.75" quat="0.657918 0.403173 -0.33235 -0.542346" fovy="70"/>
       <body name="FL_hip" pos="0.1934 0.0465 0">
         <inertial pos="-0.0054 0.00194 -0.000105" quat="0.497014 0.499245 0.505462 0.498237" mass="0.678" diaginertia="0.00088403 0.000596003 0.000479967"/>
         <joint name="FL_hip_joint" class="abduction" pos="0 0 0" axis="1 0 0"/>
@@ -315,8 +316,8 @@
     <general name="arm_motor4" class="arm_z1" joint="arm_joint4" ctrlrange="-1.51844 1.51844" gainprm="1500" biasprm="0 -1500 0"/>
     <general name="arm_motor5" class="arm_z1" joint="arm_joint5" ctrlrange="-1.3439 1.3439" gainprm="1500" biasprm="0 -1500 0"/>
     <general name="arm_motor6" class="arm_z1" joint="arm_joint6" ctrlrange="-2.79253 2.79253" gainprm="1500" biasprm="0 -1500 0"/>
-    <general name="arm_motorGripper_a" joint="arm_finger_a" ctrllimited="true" ctrlrange="-0.008 0.038" forcerange="-150 150" biastype="affine" gainprm="1200" biasprm="0 -1200 -25"/>
-    <general name="arm_motorGripper_b" joint="arm_finger_b" ctrllimited="true" ctrlrange="-0.008 0.038" forcerange="-150 150" biastype="affine" gainprm="1200" biasprm="0 -1200 -25"/>
+    <general name="arm_motorGripper_a" joint="arm_finger_a" ctrllimited="true" ctrlrange="-0.008 0.038" forcerange="-150 150" biastype="affine" gainprm="4000" biasprm="0 -4000 -25"/>
+    <general name="arm_motorGripper_b" joint="arm_finger_b" ctrllimited="true" ctrlrange="-0.008 0.038" forcerange="-150 150" biastype="affine" gainprm="4000" biasprm="0 -4000 -25"/>
   </actuator>
 
   <sensor>

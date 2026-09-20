@@ -54,6 +54,7 @@ def walk_to(sim, station, backup: float = BACKUP, on_phase=None, timeout_s: floa
     """
     loco = sim.loco
     assert loco is not None, "attach_locomotion() first"
+    loco.lock_stance(False)          # the manipulation skills leave the legs stand-locked
     ph = on_phase or (lambda _l: None)
     xs, ys, yaws = station
     h = np.array([np.cos(yaws), np.sin(yaws)])
@@ -82,10 +83,17 @@ def walk_to(sim, station, backup: float = BACKUP, on_phase=None, timeout_s: floa
         log.append((name, round(sim.time - t0, 2)))
         return True
 
+    # SHORT HOP (e.g. the table A station back to the rack station, 0.6 m sideways): the
+    # backup -> big turn -> walk -> creep route thrashes and times out on those. Under 0.8 m with
+    # the heading already right, go straight to the fine trimming, which is sidesteps and
+    # short bursts (measured: the full route failed with 0.5 m of error left, twice).
+    xy_now, yaw_now = pose()
+    short = (float(np.linalg.norm(np.array([xs, ys]) - xy_now)) < 0.8
+             and abs(_wrap(yaws - yaw_now)) < np.radians(20))
     try:
         # --- backup: straight back, heading held
         xy0, yaw0 = pose()
-        ok = run("backup",
+        ok = True if short else run("backup",
                  lambda: (-0.25, 0.0, 1.5 * _wrap(yaw0 - pose()[1])),
                  lambda: np.linalg.norm(pose()[0] - xy0) >= backup, 6.0) if backup > 0 else True
 
@@ -128,14 +136,15 @@ def walk_to(sim, station, backup: float = BACKUP, on_phase=None, timeout_s: floa
                         (np.linalg.norm(d) < 0.25 and abs(_wrap(np.arctan2(d[1], d[0]) - yaw)) > np.radians(90)))
             return run(name, cmd, arrived, 15.0)
 
-        ok = ok and run("turn", lambda: turn_cmd(lambda: bearing_to(far)),
-                        lambda: abs(_wrap(bearing_to(far) - pose()[1])) < np.radians(10), 12.0)
-        ok = ok and goto(far, "goto_far", 0.10)
-        ok = ok and goto(pre, "goto_pre", 0.05)
+        if not short:
+            ok = ok and run("turn", lambda: turn_cmd(lambda: bearing_to(far)),
+                            lambda: abs(_wrap(bearing_to(far) - pose()[1])) < np.radians(10), 12.0)
+            ok = ok and goto(far, "goto_far", 0.10)
+            ok = ok and goto(pre, "goto_pre", 0.05)
 
         # --- trim the heading (small by construction)
-        ok = ok and run("align", lambda: turn_cmd(lambda: yaws),
-                        lambda: abs(_wrap(yaws - pose()[1])) < np.radians(5), 10.0)
+        ok = ok and (short or run("align", lambda: turn_cmd(lambda: yaws),
+                                  lambda: abs(_wrap(yaws - pose()[1])) < np.radians(5), 10.0))
 
         # --- approach: creep forward, vy for lateral error, wz for heading
         n = np.array([-h[1], h[0]])
@@ -169,8 +178,8 @@ def walk_to(sim, station, backup: float = BACKUP, on_phase=None, timeout_s: floa
             return (V_CREEP, vy, 0.0)
 
         # Stop COAST early: the base keeps going ~2-5 cm after the command drops to zero.
-        ok = ok and run("approach", creep_cmd,
-                        lambda: errs()[0] < COAST or abs(errs()[1]) > 0.30, 8.0)
+        ok = ok and (short or run("approach", creep_cmd,
+                                  lambda: errs()[0] < COAST or abs(errs()[1]) > 0.30, 8.0))
         def still():
             return np.linalg.norm(sim.d.qvel[:2]) < 0.03 and abs(sim.d.qvel[5]) < 0.05
 
