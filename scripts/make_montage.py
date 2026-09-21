@@ -26,14 +26,15 @@ TIMELINE = [
     ("clip", "grasp_tape_roll.mp4", 1.6, "tape roll  -  grasped radially at the crown", None),
     ("card", "2  Carrying the load", "locomotion fine-tuned with the arm and a tool aboard", 2.5),
     ("clip", "loco_payload.mp4", 1.0, "payload gait", 6.0),
-    ("card", "3  Table to table", "pick, walk, place in the named zone  -  27/30", 2.5),
+    ("card", "3  Table to table", "pick, walk, place in the named zone  -  9/10", 2.5),
     ("clip", "transfer_side_table_small.mp4", 3.5, "transfer to the side table", None),
-    ("card", "4  Bring it to the human", "walk the route, step down, hand over  -  25/30", 2.5),
+    ("card", "4  Bring it to the human", "walk the route, step down, hand over  -  8/10", 2.5),
     ("clip", "bring_10mm_wrench_small.mp4", 3.5, "end to end, one spoken command", None),
-    ("card", "5  When it goes wrong", "tool dropped mid-carry, returned, delivered  -  26/30", 2.5),
+    ("card", "5  When it goes wrong", "dropped tool 9/10, blocked route 10/10, missing tool 10/10", 2.5),
     ("clip", "recover_drop_small.mp4", 6.0, "drop recovery", None),
-    ("card", "Grasp 125/125   Transfer 27/30   Bring-me 25/30",
-     "Missing tool 20/20   Drop recovery 26/30", 4.0),
+    ("clip", "recover_obstacle.mp4", 5.0, "a box lands on the route  -  detour and place", None),
+    ("card", "Grasp 125/125   Place 120/125 and 124/125   End to end 60/70",
+     "Grounding 10.7 mm median, 2.8% miss   -   one 6 GB GPU, no API keys", 4.0),
 ]
 
 

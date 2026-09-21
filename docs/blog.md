@@ -1,4 +1,4 @@
-# Five bugs between "it works" and it working
+# Seven bugs between "it works" and it working
 
 *Building a language-commanded mobile manipulator in simulation on one 6 GB laptop GPU.*
 
@@ -8,7 +8,9 @@ hands it over. Three layers do the work — an RL walking policy, a fine-tuned S
 and a hand-written state machine that calls a VLM to answer *where is it?*
 
 None of that is the interesting part. The interesting part is that **every single time a number
-was bad, the cause was geometry or bookkeeping, and never the thing I expected.** Here are five.
+was bad, the cause was geometry or bookkeeping, and never the thing I expected.** Here are seven —
+including the two that were hiding inside the measurements themselves, and the one that turned the
+fine-tuned policy into the most instructive result in the project.
 
 ## 1. The success metric was lying (69% → 31%)
 
@@ -65,14 +67,77 @@ nearer than 0.25 m as "that's the gripper". Tools at the ends of the rack sit **
 lens. The gripper itself reads 0.105 m. One constant, and a class of targets that could never be
 found.
 
+## 6. A seed did not identify a trial
+
+The end-to-end suite runs a scenario on seeds 0-9 and prints a fraction. For one afternoon that
+fraction depended on **which scenarios had been run before it in the same process.** `trial()`
+reseeded the scene per trial but not the orchestrator, and `Orchestrator.rng` drives every
+scripted skill's randomised move durations — so it carried on from wherever the previous trial had
+left it.
+
+Measured, same code and same seeds: `--suite drop` alone scores 9/10, while `--suite
+transfer,drop` scores drop **6/10**. One scenario's retarget seed failed inside a batch and passed
+on its own.
+
+The fix is two lines — reseed `orch.rng` per trial from the trial seed — plus one process per
+suite in the runner. The reason it is in this list is that **it invalidated a 130-trial table**
+that already looked convincing. A benchmark whose trials are not independent is not a benchmark;
+it is a story about the order you happened to type things in.
+
+The same reproducibility fix immediately exposed a real bug it had been masking. The obstacle
+recovery — drop a 0.6 m box on the route while the tool is in the jaws — was at 0/2. It turned out
+to be four separate defects, each measurable once trials were reproducible: the box lands *behind*
+the robot so the walk stalls in its opening backup (and the old recovery drove backwards, further
+into it, then estimated the obstacle along the heading, which pointed at clear floor); the detour
+waypoint was unchecked geometry that put the robot in a bench corner; a detour point was walked as
+a full *station* approach, down a line running from behind it, ending one run off the walkway
+entirely; and the final hop consumed its whole along-track error in a single burst with no lateral
+re-check inside it, drifting 0.43 m sideways while closing 0.59 m forward. Fixed in that order:
+0/2 → 7/10 → **10/10**.
+
+## 7. The fine-tuned policy was worse than doing nothing — and the loss curve looked fine
+
+The centrepiece was supposed to be SmolVLA: 1,128 demonstrations, paraphrased instructions, two
+camera streams. It trains to a loss of 0.115 and **grasps 1 of 20 held-out seeds.**
+
+The loss curve cannot see the failure, so the first thing to build was a measurement that can:
+score the policy on its **own training frames**, through the **serving path**, in radians, against
+the most trivial predictor available — *command no motion*.
+
+The absolute-action policy came out **2.10x worse than doing nothing.** The reason is
+normalisation arithmetic, not learning: per-step motion is ~0.026 rad while the action spread the
+normaliser divides by is 0.28-0.68 rad, so the target the network is asked to predict is 4-8% of
+its own scale. Recording `q_cmd - q_state` instead rescales that target 7-17x per joint, and the
+same architecture goes to **1.68x better** than the baseline. An overfit control — 40 episodes seen
+11.7 times — reaches **3.8x better on every joint**, which rules out the architecture, the data
+pipeline and the serving path in one measurement.
+
+And closed-loop grasping still did not move. One-step prediction improved 3.5x; success stayed at
+1/20. The two numbers measure different things, and the gap between them has a name: **covariate
+shift.** Every demonstration came from a scripted controller that never made a mistake, so the
+dataset is a narrow, noise-free tube through state space with no recovery states in it. The policy
+can reproduce the tube and cannot get back into it once it is outside — which is exactly what a
+closed loop in an unseen scene asks of it.
+
+That is a data problem, not a GPU problem, and it is the one thing more compute could not have
+told me. The test is to kick the demonstrator off its own path — a servo offset on the arm while
+the *label* stays the nominal command — so that every frame from the kick until the arm is back on
+the path pairs an off-tube state with the command that corrects it.
+
+**A negative result with a mechanism is worth more than a mediocre positive.** I would rather
+publish "1/20, and here is the chain of measurements that says why" than a 40% that nobody,
+including me, can explain.
+
 ## What the final numbers say
 
 | | |
 |---|---|
 | Grasp, legs on the walking policy | 125/125 |
 | Two-table transfer, walking between stations | 120/125 and 124/125 |
-| End-to-end task suite (5 scenarios, 130 trials) | 114/130 (88%) |
-| Dominant failure | the base falling while stepping DOWN off the walkway with a tool held (13 of 16) |
+| Grounding `locate()` | 10.7 mm median xy error, 2.8% miss |
+| End-to-end suite, 7 scenarios x 10 seeds, one process and one rng per trial | **60/70 (86%)** |
+| Fine-tuned SmolVLA, closed loop | 1/20 — a negative, diagnosed above |
+| Dominant failure | the base falling while stepping DOWN off the walkway with a tool held (**8 of the 10**) |
 
 That last row is the honest headline. After all the manipulation work, **what limits the system is
 locomotion** — a 12 cm step down, taken with a 2 kg arm extended and a tool in the jaws, which the

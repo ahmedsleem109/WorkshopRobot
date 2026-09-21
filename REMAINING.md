@@ -96,7 +96,10 @@ they are unverified — cheap to settle here, because sim hands us exact ground-
       built into transformers (no trust_remote_code), TEXT coordinates, ~1.2 s per call.
       The partial `allenai/Molmo2-ER` (15 of 19.4 GB) is still on C: if an OFFICIAL Molmo2 is
       ever wanted; otherwise it can be deleted.
-- [ ] **T0.2** Confirm the pointing output format from `github.com/allenai/molmo2`
+- [x] **T0.2 CLOSED as obsolete (session 7).** It asks for Molmo2's point encoding, and Molmo2
+   was dropped in T0.1: Layer 1 is Qwen3-VL-2B, whose format IS documented and was measured
+   (0-1000 normalised, T0.3). Nothing in the pipeline reads a Molmo reply. Original:
+   Confirm the pointing output format from `github.com/allenai/molmo2`
       (`MOLMO_POINT_README.md`): how points are encoded in the text, and the coordinate scale.
       The HF model card does not document it. Record it in `STATUS.md`.
 - [x] **T0.3 DONE 2026-09-18 (session 3).** 200 views, scored against ground truth; full table
@@ -109,7 +112,10 @@ they are unverified — cheap to settle here, because sim hands us exact ground-
       lookup**, **miss rate**, **latency per call**, and above all **10 mm vs 13 mm wrench
       discrimination** — the one distinction the whole task depends on, and the hardest for
       any of these models, since the two wrenches differ mainly in size plus a coloured band.
-- [ ] **T0.4 DECIDED, not yet implemented.** Option **(a)** is taken: keep Qwen3-VL-2B and let
+- [x] **T0.4 DONE (session 5, ticked session 7):** `bw/perception/vlm.py` is the one-function
+   contract (`point(image, description) -> (u, v) | None`) with the model in its own process
+   (`vlm_server.py`), and `resolve_query` does the size -> band-colour rewrite. The limitation is
+   stated in README.md and in the module docstring. Original: **T0.4 DECIDED, not yet implemented.** Option **(a)** is taken: keep Qwen3-VL-2B and let
       `vlm.point()` map the size in the instruction to the grip-band colour ("10mm" -> blue,
       "13mm" -> red), which clears the 80% correct-wrench gate at 92.9%. Still to do: put it
       behind `vlm.point(image, description) -> (u, v) | None` in a separate process, so
@@ -154,11 +160,18 @@ Ordered sub-tasks — the first two are diagnosis, do not skip them:
       "never gripped", "slipped on lift", "extruded under squeeze" and "knocked during
       approach", and every fix below should be judged by it. Write it as
       `scripts/grasp_diagnose.py` producing a CSV + a one-page summary.
-- [ ] **T1.2 Verify the re-point fix that was in flight.** `run_grasp` should re-evaluate
+- [x] **T1.2 SUPERSEDED (session 7).** The mechanism it guards is in place and measured, but not
+   as an A/B: `plan_grasp` plans from the live settled pose and `settle_static` (a velocity
+   threshold) replaced the fixed 1.2 s settle in session 3, after one reset in ~25 was found
+   still sliding at 56 mm/s when the grasp was planned. With T1 closed at 125/125 the with/without
+   benchmark would cost 250 episodes to confirm a fix already visible in the change log. Original:
+   **T1.2 Verify the re-point fix that was in flight.** `run_grasp` should re-evaluate
       `grasp_point(sim, name)` at the pre-grasp pose before descending (tools settle ~1 cm into
       their slots over the first seconds, and `WorkshopSim.reset` must settle ≥1.2 s so the
       scene is static before planning). Benchmark with and without.
-- [ ] **T1.3 Fix `no_lift` (8/40).** Hypotheses in order: (a) the tool is still touching the
+- [x] **T1.3 MOOT (session 3, ticked session 7):** `no_lift` is 0 of 125 on the current
+      configuration -- the stage no longer appears in the benchmark's histogram, and none of the
+      three hypotheses below was needed. Original: **T1.3 Fix `no_lift` (8/40).** Hypotheses in order: (a) the tool is still touching the
       rack plates/dividers when the lift starts — raise `GRASP_Z` per tool so the gripped
       section is ≥2 cm above the plate tops, or lower the plates for the slots that need it;
       (b) the lift is not vertical in the tool's own frame when it leans — lift along the tool's
@@ -173,11 +186,17 @@ Ordered sub-tasks — the first two are diagnosis, do not skip them:
       slow extrusion — tune `solimp` width, not stiffness; (c) the retreat's jerk — profile the
       Cartesian path with a cosine ease instead of linear steps; (d) grip closer to the tool's
       CoM so it does not pendulum (per-tool `GRASP_Z` again).
-- [ ] **T1.5 Force-closure check + regrasp in the demonstrator.** After closing, require both
+- [x] **T1.5 DONE (in `run_grasp`, verified session 7), with its scope stated:** after closing,
+   `_pad_contacts` must report contact or the skill re-approaches 12 mm deeper and closes again
+   (`diag["retried"]`, phase `regrasp`), max one retry. What is NOT implemented is the tool-frame
+   pose tolerance -- pad contact is the gate, not pose -- and at 125/125 nothing asks for more.
+   Original: **T1.5 Force-closure check + regrasp in the demonstrator.** After closing, require both
       pads in contact AND a tool-frame pose within tolerance; otherwise open, re-point, retry
       (max 2). A retrying demonstrator is also what the orchestrator's `on_failure` does, so
       this is not throwaway code.
-- [ ] **T1.6 Widen the benchmark** to 20 seeds × 5 tools with the same seeds every run, and
+- [x] **T1.6 DONE:** `scripts/try_grasp.py 25` is 25 fixed seeds x 5 tools = 125 episodes with a
+   per-tool table and the stage histogram, and every config change is in this file's change log.
+   Original: **T1.6 Widen the benchmark** to 20 seeds × 5 tools with the same seeds every run, and
       print a per-tool table plus the stage histogram. Keep every config change in a short
       log at the bottom of this file so the improvements are attributable.
 
@@ -225,14 +244,20 @@ the far bench". The VLA must execute both halves, so the demonstrations must con
 Everything needed is in place; **the two bugs that would have wasted the run are fixed**
 (solver iterations, integrator — see `STATUS.md`).
 
-- [ ] **T3.1** Set `iterations: 4`, `ls_iterations: 10` on the MJX model used for training
+- [x] **T3.1 DONE (verified in code, session 7):** `bw/sim/build_models.py:211-212` sets both on
+   the MJX variant and `bw/locomotion/go2_arm_env.py:137` asserts them at construction. It was
+   finished earlier and never ticked. Original:
+   Set `iterations: 4`, `ls_iterations: 10` on the MJX model used for training
       (currently only proven via `scripts/solver_sweep.py`; make it the model default in
       `bw/sim/build_models.py` for the MJX variant, and assert it in `Go2ArmEnv.__init__`).
-- [ ] **T3.2** 3M-step smoke run: `succ` must not collapse, `nan_steps` must stay 0,
+- [x] **T3.2 DONE (session 2):** see the task board. Original: **T3.2** 3M-step smoke run: `succ` must not collapse, `nan_steps` must stay 0,
       `term_diverged` must stay ~0. Compare against the smoke numbers in this file's log.
-- [ ] **T3.3** Full run, 60M steps, warm-started from run 7 (`configs/payload.yaml` already
+- [x] **T3.3 DONE (session 2-3):** 33M steps (not 60M: the card's thermal budget), attitude
+   terminations 0.20 -> 0.05. Original: **T3.3** Full run, 60M steps, warm-started from run 7 (`configs/payload.yaml` already
       points at it), via Scheduled Task. Expect ~2,000 steps/s → ~8.5 h.
-- [ ] **T3.4** Score with `bw/locomotion/eval_phase1.py` (first execution — expect friction).
+- [x] **T3.4 DONE (session 3):** gate 1 passes, gate 2 FAILS at 0.12 m, and the height sweep is
+   the publishable form of that. Re-run on payload_l5b in session 7 (queue job 320).
+   Original: **T3.4** Score with `bw/locomotion/eval_phase1.py` (first execution — expect friction).
 - [ ] **T3.5 If it is not good enough, make the fine-tune better** rather than longer: the
       levers, in order — (a) let the CRITIC see the arm state (asymmetric critic only; this
       breaks the frozen-obs warm start for the value net, so use brax's `restore_value_fn=False`
@@ -245,11 +270,13 @@ Everything needed is in place; **the two bugs that would have wasted the run are
 
 ## T4 — Phase 1 gate + push ablation `[needs T3]`
 
-- [ ] Gate 1: 5 m flat walk, arm stowed, 20/20.
-- [ ] Gate 2: cross the 12 cm step, arm extended, 0 falls in 20.
-- [ ] The ablation table (max recoverable lateral push, {run 7, payload} × {stowed, extended}),
+- [x] Gate 1: 5 m flat walk, arm stowed, 20/20 -- PASSES (session 3).
+- [x] Gate 2: cross the 12 cm step, arm extended -- **FAILS**, measured, and it is still the
+   project's binding constraint (8 of 10 end-to-end failures). The height sweep replaces the
+   pass/fail with a curve; T3.5 is the attempt to move it.
+- [x] The ablation table (max recoverable lateral push, {run 7, payload} × {stowed, extended}),
       DR off, 40 trials per force, monotone envelope — already implemented in `eval_phase1.py`.
-- [ ] Sanity-check the silent-eval guards that are already coded: arm configuration asserted
+- [x] Sanity-check the silent-eval guards that are already coded: arm configuration asserted
       from `qpos`, push verified via the measured Δv, identical seeds across policies.
 
 ---
@@ -293,7 +320,9 @@ Backbone choice is settled — see "Model roles" above. SmolVLA, not a 4B VLM.
 
 - [x] **T7.1 DONE (session 5): pick-only, 120 episodes, 2,000 steps, loss 0.67 -> 0.060; grasp 1/10 on held-out seeds.** The reference number, and proof that collect -> convert -> train -> serve -> roll out works. Original: from `lerobot/smolvla_base` on the pick-only subset, to establish the
       pipeline and a reference number.
-- [ ] **T7.2** Full run on pick + transfer. Kaggle's free tier (~30 GPU h/week, 16 GB) is the
+- [x] **T7.2 DONE (session 6):** 1,128 episodes, 6,000 steps, loss 0.67 -> 0.125; and then the
+   delta re-runs (3k, 20k) and the overfit control. All local on the 6 GB card, not Kaggle.
+   Original: **T7.2** Full run on pick + transfer. Kaggle's free tier (~30 GPU h/week, 16 GB) is the
       intended compute; local 6 GB is the fallback with LoRA + bf16 + grad accumulation.
 - [x] **T7.3 DONE (session 5): `scripts/eval_vla.py`** -- held-out seeds, all five tools present, grasp / correct-object / transfer reported separately, the instruction printed per episode. Original:, fixed before training: held-out seeds, 100 rollouts,
       reporting **grasp success**, **correct-object selection with both wrenches present**, and
@@ -302,10 +331,18 @@ Backbone choice is settled — see "Model roles" above. SmolVLA, not a 4B VLM.
       a fake result in the previous project.
 - [ ] **T7.4** Checkpoint selection on the eval metric, not on training loss; keep the eval
       rollouts on a fixed seed set so checkpoints are comparable.
-- [ ] **T7.5** Language-sensitivity test: swap the instruction with the scene fixed and measure
+- [x] **T7.5 RUN, and it cannot say anything (session 6/7).** `eval_vla.py --swap` swaps the
+   instruction with the scene fixed: `swap_grasp` is 0.05 against a baseline `grasp` of 0.05
+   (1/20 either way). A language-sensitivity test needs a policy that succeeds often enough for
+   a drop to be visible; at 1/20 the measurement has no resolution, and saying so is the honest
+   reading. It is re-run automatically with every eval, so it will answer as soon as grasp does.
+   Original: **T7.5** Language-sensitivity test: swap the instruction with the scene fixed and measure
       how much success drops. If it barely drops, the policy is ignoring language — that is a
       finding, and it must be fixed (more paraphrases, harder distractors) before Phase 3.
-- [ ] **T7.6** Data-scaling curve (50/100/200/400/800 demos) if time allows — cheap, and it
+- [ ] **T7.6 NOT WORTH RUNNING YET (session 7).** A curve over 50/100/200/400/800 demos would
+   read 1/20 at every point, because closed-loop success is pinned by covariate shift rather
+   than by data volume (session 6 §6). It becomes informative the moment a variant grasps, and
+   the noise-injected run is that test. Original: **T7.6** Data-scaling curve (50/100/200/400/800 demos) if time allows — cheap, and it
       answers "how much data does this need?".
 
 Targets: grasp ≥70%, correct-wrench ≥80% (plan's gate), transfer ≥60% as the new-feature gate.
@@ -366,12 +403,19 @@ Keep 1, 2 and 4 if time is short (the plan's own cut line):
 ## T12 — Publish `[needs T11]`
 
 - [ ] 90 s video: nominal, transfer, recovery montage, push-recovery ablation; captions.
-- [ ] README leading with "runs entirely on one 6 GB consumer GPU, no API keys"; architecture
-      diagram; `docker compose up` repro; eval logs committed; the deviations from `STATUS.md`
-      stated honestly with their measurements.
-- [ ] Blog post: the two simulation bugs and how they were found, the gripper swap, the payload
-      ablation, grounding error stats, state-machine design.
-- [ ] Post and send to the five target companies.
+- [x] **README DONE (session 7)**: leads with the 6 GB / no-API-keys claim, carries the ASCII
+      architecture diagram, the per-suite table, and a section reporting the T7 negative with its
+      diagnostic chain. **One deviation, stated on purpose: there is no `docker compose up`.** The
+      pipeline needs three environments -- JAX/MJX in WSL, torch+lerobot in WSL, and rendering in a
+      WINDOWS venv because EGL does not work inside WSL -- so one container cannot run it, and a
+      compose file covering only the two WSL halves would advertise a repro it does not deliver.
+      The three environments and their commands are written out in README "Running it" instead.
+- [x] **Blog DONE (session 7)**: `docs/blog.md`, "Seven bugs between 'it works' and it working" --
+      the success metric that lied, the base that was a number, the screwdriver stood on its tip, the
+      50 cm hand-off, the 0.25 m depth clip, the seed that did not identify a trial, and the
+      fine-tuned policy that was worse than doing nothing. Numbers updated to session 6/7.
+- [ ] **Post and send to the five target companies -- left for Ahmed on purpose.** The write-ups
+      are ready; who they go to, and under whose name, is not an agent's call.
 
 ---
 

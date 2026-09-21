@@ -87,6 +87,162 @@ prompt/verify question, and the 32 rendered seeds in `runs/t8_views` re-score it
 
 ---
 
+## SESSION 7 (2026-09-21) -- in progress: T3.5 in both lineages, the place tail, T7's data test
+
+Written as the work lands; every number below is measured unless it says "running".
+
+### 1. T3.5, and a bug that had kept it from ever starting
+`ops/resume_payload_l5.sh` was "written and ready" since session 6 and had never been run. Its own
+guard is `[ -d "$L5" ]` -- but brax writes a checkpoint as a FILE here, not a directory, so the
+first launch exited instantly with "no checkpoint at .../step_4587520" against a checkpoint that
+was plainly there. Fixed to `-e`. (The lesson is the one session 6 already wrote down about
+scripts that have never been executed.)
+
+**GATE 2 NOW PASSES -- and the training metric said the opposite.** The Phase 1 gate on the chosen
+checkpoint (step_1310720), against stairs run 7 as the control, 20 trials per cell:
+
+| | gate 1 (5 m flat, stowed) | gate 2 (0.12 m step, arm extended) | height sweep, falls/20 |
+|---|---|---|---|
+| original (stairs run 7) | 20/20 PASS | **19 falls, FAIL** | 0.06:0  0.08:3  0.10:14  0.11:18  0.12:19  0.13:20 |
+| **payload_l5b @ 1,310,720** | 20/20 PASS | **0 falls, PASS** | 0.06:0  0.08:0  0.10:0  0.11:0  0.12:0  **0.13:5** |
+
+Push recovery, same run: payload 240 N stowed and extended, against the original's 160 N / 200 N.
+
+So the 12 cm step DOWN -- the thing that lost 8 of 10 end-to-end trials and had failed this gate
+since session 3 -- is now clean in MJX, and the policy's own failure edge has moved to 0.13 m.
+**The training success EMA was the wrong thing to read.** It stayed in the 0.22-0.30 band all run
+because it scores the level-5 task, i.e. the 0.130 m step, where the policy still falls 5 in 20; the
+gate's geometry is 0.120 m, where it now falls none. An interim read of this session called the run
+a negative on the strength of that EMA. It was not: the gate is the metric that was asked for, and
+it moved from FAIL to PASS.
+
+What is still open is DEPLOYMENT, not locomotion: this lineage trains on the forward-only command
+distribution and cannot turn in place, back up or sidestep, which the pipeline cannot do without.
+That is what `payload_nav_l5` is for, and it is now the run that matters.
+
+**The L5 continuation's own reward curve, for the record:** 5,898,240 steps in 130.7 min
+(753 sps): level-5 success stayed inside the 0.22-0.30 band it started in (final 0.27 against 0.25
+at session 5's stop), reward peaked at **2,935.97 at step 1,310,720** and the remaining 4.6M steps
+produced nothing better -- 2,374 at its worst, with contact terminations (the trunk striking the
+riser, which is gate 2's own failure mode) rising 0.38 -> 0.53 as it went. So the step is not
+step-count-limited at this level, and `checkpoints/final` is the WORST policy the run produced.
+`scripts/pick_best_ckpt.py` now chooses from a run's own eval rows for both locomotion exports --
+the same rule T7.4 applies to the VLA, and it would have been needed here: every ops script until
+now exported `final`.
+
+| payload_l5b (5.5M steps from step 4,587,520) | reward | succ | contact term |
+|---|---|---|---|
+| warm start (step 0 eval) | 2,742 | 0.30 | 0.45 |
+| **best, step 1,310,720** | **2,936** | 0.25 | 0.38 |
+| step 3,932,160 (worst) | 2,375 | 0.20 | 0.53 |
+| final, step 5,898,240 | 2,867 | 0.27 | 0.44 |
+
+**Two lineages, not one, because they are not interchangeable.** `payload_l5` trains the STEP
+(level_init 5 = 0.130 m) on the ORIGINAL forward-only command distribution, so it can serve the
+Phase 1 gate and the height sweep -- neither needs turning. But the DEPLOYED policy is
+`payload_nav_policy.npz` (= payload_nav3 final), which is what gives the pipeline turn-in-place,
+back-up and sidestep, and nav3 trained at level_init 4 / level_min 3. So the 12 cm step DOWN that
+loses 8 of 10 end-to-end trials is being taken by a policy whose curriculum never contained it,
+and swapping payload_l5b in would lose navigation. `configs/payload_nav_l5.yaml` is nav3's config
+with ONE change -- level_init 4 -> 5, level_min 3 -> 4, warm-started from nav3 final -- so the
+comparison at a fixed step count is a comparison of the curriculum alone.
+
+### 2. The place distribution's tail: a silent give-up in the align, and an aim shift that still earns its keep
+`scripts/topple_diagnose.py`, 14 pliers transfers onto table A: **displacement after release is a
+median 0 mm and cos(displacement, lean) is -0.00.** The topple that `PLACE_AIM_SHIFT` (45 mm) was
+introduced for -- session 5 measured cos = +1.00 over 25 transfers -- does not happen on the
+current release poses. Meanwhile the tool's position AT RELEASE scattered +-70 mm in the zone frame
+against a 100 mm half-width. So the 1-transfer-in-10 that lands outside the zone is a
+RELEASE-POSITION failure, not a topple, and two mechanisms feed it:
+  * `_servo_xy` gives up SILENTLY -- it returns as soon as one pass's IK fails to converge (`ok`
+    false or residual > 1 cm), and nothing checked the achieved offset before the jaws opened.
+    Reproduced: transfer seed 8 releases the pliers 55.6 mm from its own aim point.
+  * the aim point itself is centre + 45 mm (the shift) + up to 20 mm (jitter), so a converged
+    align can still sit 65 mm out before the tool has moved at all.
+Two changes: a pre-release guard (`PLACE_MAX_OFFSET` 50 mm) re-servos at the jitter-free aim with
+more passes and a tighter tolerance, and the shift is now conditional on the tool's MEASURED lean
+(vertical hang, tape roll, or standing upright -> aim at the centre).
+
+**The obvious next step -- drop the 45 mm shift entirely -- was A/B'd and REJECTED by its own
+numbers.** 10 seeds x 4 tools on table A, teleported base, one arm per value of the shift
+(`BW_PLACE_AIM_SHIFT`, added so the sweep needs no edit to the skill):
+
+| table A, 10 seeds per tool | shift 45 mm (kept) | shift removed |
+|---|---|---|
+| wrench_10mm | 10/10 | 10/10 |
+| wrench_13mm | **10/10** | **7/10** |
+| pliers | 10/10 | 9/10 |
+| tape_roll | 6/6 | 6/6 |
+| total | **36/36** | 32/33 |
+
+The "it pays for a topple that stopped happening" reading held for the PLIERS, which is what was
+measured first, and not for the wrenches, which still travel when released leaning. So the shift
+stays wherever the tool hangs leaning and is dropped only for a near-vertical hang -- the one case
+the measurement supports. `eval_suite.py` also records
+where the tool actually ended up (`gt`: position, zone delta, dz, held, base) on every trial, so a
+failed trial no longer needs re-running by hand to find out what it was.
+
+### 3. T7 TIER 1: the VLA was evaluated with the legs FREE, which no demonstration ever was
+
+Before spending 6 more GPU hours on the covariate-shift dataset, two cheap diagnostics. The first
+one changed the picture.
+
+`sim.lock_stance()` -- legs held on joint PD while the arm works -- is called by `run_grasp`,
+`run_place` and the orchestrator. It was called NOWHERE in the VLA path: not in
+`bw/policy/vla.py:run_skill`, not in `scripts/eval_vla.py`. `Locomotion.lock_stance` exists because,
+measured in session 5, "under the policy the arm's reach and pull push the standing base back
+25-260 mm (it steps away from the load), so the jaws arrive short or the tool is dragged against the
+rack". So every demonstration was recorded on a LOCKED base and every rollout behind the 1/20 ran on
+a base walking away from the rack -- a regime that appears in no training frame, and one the
+ORCHESTRATOR never uses, because it locks the stance itself before calling a skill.
+
+`scripts/vla_exec_check.py` replays each demonstration's OWN recorded actions through the serving
+loop (10-action chunks at 10 Hz, deltas re-applied to the live joint position, exactly as the client
+does) into the scene it was collected in, and scores it with the same `evaluate(Task("pick"))` the
+VLA eval uses. No policy, no GPU. 8 demonstrations, four cells:
+
+| cell | grasp with PERFECT actions | mean base movement |
+|---|---|---|
+| absolute, legs locked | **8/8** | 4.3 mm |
+| absolute, legs free | 5/8 | 35.1 mm |
+| delta, legs locked | **8/8** | 4.3 mm |
+| delta, legs free (**what the 1/20 was measured in**) | **3/8** | 39.4 mm |
+
+Two things follow, and they point in opposite directions:
+  * **The delta serving convention is NOT lossy.** Locked, delta replay equals absolute replay at
+    8/8. The representation is fine and does not need changing.
+  * **The harness was capping the achievable score at ~3/8.** A perfect policy grasps 3 of 8 in the
+    regime the evaluation ran in. The policy scored 1/20, so it is genuinely bad as well -- but the
+    session-6 inference from "prediction improved 3.5x while closed-loop success did not move" was
+    drawn against a ceiling of ~37%, not 100%, so covariate shift is no longer established. It is
+    back to being one candidate among others.
+
+`run_skill` now locks the stance (with the measurement in its docstring), and `eval_vla.py
+--train-scenes` can score the policy on the scenes the DEMONSTRATIONS were collected in, using
+`collect_demos`'s own rng stream -- so "cannot grasp anywhere" and "cannot grasp in a NEW scene" can
+finally be told apart. Queue job 327 runs both, on the existing delta-20k checkpoint, BEFORE the
+union training.
+
+### 4. T7's covariate-shift dataset (built, and now demoted to one candidate among others)
+`bw/manip/disturb.py` + `collect_demos.py --noise`: DART-style kicks on the ARM (a servo offset)
+with the LABEL left nominal, so every frame from a kick until the arm is back on the path pairs an
+off-tube state with the command that corrects it. The gripper is never kicked (that just drops the
+tool) and neither are the close / lift / descend / release phases (that knocks the scene). Yield
+sweep, seeds 90000-90013 at sigma 0.04 / 0.08 / 0.12: 8 of 8 runs still produced a clean pick AND
+place, while |q_cmd - q_state| widened where it matters -- j1 3.0 -> 5.0 mrad median and j5
+2.5 -> 5.0, which are precisely the two joints that never beat the trivial baseline in EITHER delta
+run. Collection runs at sigma 0.10 / p 0.15 (`ops/collect_noise.sh`, 600 runs, 3 lanes).
+
+### 5. Bookkeeping that was wrong rather than missing
+Ten REMAINING items were finished in earlier sessions and never ticked (T0.4, T1.3, T1.5, T1.6,
+T3.1-T3.4, T7.2, gate 1/2 + the ablation). T0.2 is closed as obsolete -- it asks for Molmo2's point
+encoding and Molmo2 was dropped in T0.1. T7.5 (language sensitivity) has been RUN and cannot say
+anything: `swap_grasp` 0.05 against `grasp` 0.05 is 1/20 either way, so the test has no resolution
+until a variant grasps. T7.6 (data-scaling curve) would read 1/20 at every point for the same
+reason.
+
+---
+
 ## SESSION 6 (2026-09-20) -- obstacle recovery fixed; T7 re-run; the step is the last blocker
 
 ### 1. T10 #3 obstacle recovery: 0/2 -> 9/10 (three separate defects, all measured)

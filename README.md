@@ -26,13 +26,54 @@ it to the person — and says something useful when it cannot.
 | Grasp, legs standing on the walking policy | **125/125** (5 tools x 25 seeds) | `scripts/try_grasp.py 25 --walk` |
 | Two-table transfer, walking between stations | **120/125** table A, **124/125** table B | `scripts/try_place.py 25 --walk --table X` |
 | Walks reaching the station | 214/214, no falls | session 4 |
-| Grounding `locate()` | 13.4 mm median xy error, 11% miss (pliers: 0/7) | `scripts/bench_locate.py`, `scripts/score_locate.py` |
+| Grounding `locate()` | **10.7 mm** median xy error, **2.8%** miss, 135/180 right tool within 30 mm | `scripts/bench_locate.py`, `scripts/score_locate.py` |
 | Layer 3 numpy controller vs MJX | action difference 1.8e-6 | `scripts/t5_obs_check.py` |
-| Demonstration data | **1,128 episodes**, LeRobot v3.0, paraphrased instructions | `scripts/collect_demos.py`, `scripts/to_lerobot.py` |
-| End to end, scripted skills + oracle grounding | transfer 9/10, bring-me 7/10, missing tool 6/6, drop recovery 9/10 | `scripts/eval_suite.py` |
+| Demonstration data | **1,128 episodes** / 104k frames, LeRobot v3.0, paraphrased instructions | `scripts/collect_demos.py`, `scripts/to_lerobot.py` |
+| End to end, scripted skills + oracle grounding, 7 suites x 10 seeds | **60/70 (86%)** | `ops/run_eval_suites.sh`, `scripts/eval_summary.py` |
+| Fine-tuned SmolVLA, closed loop | **1/20 -- a measured negative, diagnosed** (below) | `scripts/eval_vla.py`, `scripts/vla_replay_check.py` |
 
-The dominant end-to-end failure is **locomotion, not manipulation**: stepping DOWN off the 12 cm
-walkway while carrying a tool (3 of 10 bring-me trials). See `STATUS.md`.
+Per suite, ten seeds each, one process and one reseeded rng per trial:
+
+| suite | success | what lost the rest |
+|---|---|---|
+| nominal ("bring me the ...") | 8/10 | 2 falls stepping down off the walkway |
+| two-table transfer | 9/10 | 1 tool placed outside the zone |
+| missing tool -> report it | 10/10 | -- |
+| mid-carry drop -> re-grasp | 9/10 | 1 fall on the step |
+| ambiguous "wrench" -> ask | 8/10 | 2 falls on the step |
+| retarget mid-walk | 6/10 | 3 falls on the step, 1 grasp |
+| obstacle on the route -> detour | 10/10 | -- |
+
+The dominant end-to-end failure is **locomotion, not manipulation**: **8 of the 10 failures** are
+the base falling on the 12 cm step DOWN off the walkway with a tool in the jaws. No trial was lost
+to the grasp, the place or the grounding layer's own skill. See `STATUS.md`.
+
+## The learned policy is a negative result, and it is reported as one
+
+SmolVLA was fine-tuned on the 1,128 demonstrations and **grasps 1 of 20 held-out seeds**. That is
+the honest headline for Layer 2, and the diagnosis is the part worth reading, because each step is
+a measurement rather than a guess:
+
+| model | epochs | one-step prediction vs the trivial "command no motion" predictor | grasp |
+|---|---|---|---|
+| absolute joint targets, 6k steps | 0.92 | **2.10x WORSE** | 1/20 |
+| delta targets, 3k steps | 0.46 | 1.20x worse | 0/20 |
+| delta targets, 20k steps | 3.0 | **1.68x BETTER** | 1/20 |
+| overfit control: 40 episodes seen 11.7x | 11.7 | **3.8x BETTER** | -- |
+
+1. **Training loss cannot see the failure.** The absolute run reached loss 0.115 and could not
+   grasp. `scripts/vla_replay_check.py` scores the policy on its own training frames, through the
+   serving path, against the trivial predictor -- which is what loss does not tell you.
+2. **The action representation was wrong.** With absolute targets, per-step motion (~0.026 rad) is
+   4-8% of the spread the normaliser divides by, so the policy was worse than doing nothing.
+   `to_lerobot.py --delta` records `q_cmd - q_state`, rescaling the target 7-17x per joint.
+3. **Capacity, pipeline and serving are not the problem** -- the overfit control predicts 3.8x
+   better than baseline on every joint.
+4. **What remains is covariate shift.** One-step prediction improved 3.5x while closed-loop
+   success did not move. Every demonstration came from a scripted controller that never made a
+   mistake, so the data contains no recovery states. `--noise` in `scripts/collect_demos.py`
+   (`bw/manip/disturb.py`) injects kicks into the demonstrator to test exactly that, and it is a
+   DATA change, not more GPU hours.
 
 ## What is honest about this
 
