@@ -58,6 +58,9 @@ def main():
                     help="a tick whose largest joint delta exceeds this is transport, not fine")
     ap.add_argument("--fine-fallback", type=float, default=0.4,
                     help="fraction to drop when no tick exceeds --transport-mrad")
+    ap.add_argument("--clip-delta", type=float, default=0.0,
+                    help="clip each delta component to +-this many mrad (IK-branch jumps otherwise "
+                         "set the normaliser's scale); 0 = off")
     ap.add_argument("--quiet-window", type=int, default=5,
                     help="ticks that must all be below --transport-mrad for the swing to be over")
     ap.add_argument("--min-fine", type=int, default=25,
@@ -162,6 +165,16 @@ def main():
                 # already large against its own spread, and it is the one channel the absolute
                 # policy beat the copy-state baseline on (0.0016 vs 0.0064 rad).
                 act[:6] = act[:6] - np.asarray(arr["state"][t], np.float32)[:6]
+            if args.clip_delta and args.delta:
+                # A single 10 Hz tick cannot legitimately command 2.4 rad. Those are IK-branch
+                # switches and multi-start re-solves in the PLACE skill, and they wreck the
+                # normaliser for everything else: measured over 150 episodes of each kind, the fine
+                # phase's j1 delta std is 10.3 mrad for pick and 149.4 mrad for place, with a place
+                # p99 of 756 mrad and a max of 2,428. Trained together under one MEAN_STD scale, the
+                # pick's median j1 motion (1.8 mrad) is ~1% of the divisor -- below the 4-8% regime
+                # session 6 measured as unlearnable. Clipping costs 0.05-3% of pick frames.
+                lim = args.clip_delta / 1000.0
+                act[:6] = np.clip(act[:6], -lim, lim)
             ds.add_frame({KEY["wrist"]: frames["wrist"][t],
                           KEY["mast"]: frames["mast"][t],
                           "observation.state": arr["state"][t],
