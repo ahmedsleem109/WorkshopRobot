@@ -62,9 +62,22 @@ def query(sim, task: str, reset: bool) -> np.ndarray:
 
 
 def run_skill(sim, task: str, max_s: float, done=None, rate_hz: float = 10.0,
-              record=None) -> dict:
+              record=None, lock_stance: bool = True) -> dict:
     """Execute the policy for up to `max_s` seconds of sim time. `done(sim)` -> bool ends the
-    episode early (e.g. the tool is lifted and held). Returns {"steps", "stopped_early"}."""
+    episode early (e.g. the tool is lifted and held). Returns {"steps", "stopped_early"}.
+
+    THE LEGS ARE STAND-LOCKED, like every demonstration this policy was trained on (session 7).
+    `run_grasp` and `run_place` call `sim.lock_stance()` before they plan, and
+    `Locomotion.lock_stance` exists because, measured, "under the policy the arm's reach and pull
+    push the standing base back 25-260 mm (it steps away from the load), so the jaws arrive short or
+    the tool is dragged against the rack". This function did not call it and neither did
+    scripts/eval_vla.py, so every rollout behind the 1/20 was executed on a base that walks away
+    from the rack while the arm reaches -- a regime absent from the training data, and one the
+    orchestrator never actually uses, since it locks the stance itself before calling a skill.
+    Measured with PERFECT actions replayed through this loop (scripts/vla_exec_check.py): locked,
+    the demonstrations' own actions grasp; free, the base moves ~36 mm and grasps start failing."""
+    if lock_stance:
+        sim.lock_stance()
     steps, first = 0, True
     delta = is_delta()
     n_max = int(max_s * rate_hz)
