@@ -7,6 +7,7 @@ full-frame cards. Everything is normalised to 960x540 @ 25 fps so the concat dem
 them without re-encoding twice. Re-run it after new clips are rendered -- it is cheap.
 """
 import argparse
+import re
 import shutil
 import subprocess
 import sys
@@ -44,12 +45,58 @@ def esc(t: str) -> str:
             .replace("'", "’").replace("%", r"\%"))
 
 
+# Arial Bold advances about 0.56 em per character averaged over this deck's text. Good enough to
+# decide line breaks; the card is centred, so a few px of error is invisible.
+CHAR_EM = 0.56
+MARGIN = 60
+
+
+def wrap(text, fontsize, max_lines):
+    """Greedy wrap, shrinking the font until the text fits max_lines within the frame."""
+    # The deck separates statistics on one line by a RUN of spaces ("Grasp 125/125   Place ...").
+    # Wrapping splits on whitespace, which would collapse those to single spaces and leave the
+    # line reading as one run-on sentence, so promote them to a visible separator first.
+    text = re.sub(r"\s{2,}(?:[-–—]\s{2,})?", " · ", text.strip())
+    while True:
+        limit = max(1, int((W - 2 * MARGIN) / (fontsize * CHAR_EM)))
+        lines, cur = [], ""
+        for word in text.split():
+            trial = f"{cur} {word}".strip()
+            if len(trial) <= limit or not cur:
+                cur = trial
+            else:
+                lines.append(cur)
+                cur = word
+        if cur:
+            lines.append(cur)
+        if len(lines) <= max_lines or fontsize <= 14:
+            return lines, fontsize
+        fontsize -= 2
+
+
+def _text(line, fontsize, colour, y):
+    # expansion=none: drawtext otherwise runs its own strftime-style pass over the text and a
+    # bare '%' makes it drop the WHOLE string -- which is how the closing card lost its subtitle
+    # ("2.8% miss") while only warning "Stray %" to stderr.
+    return (f"drawtext=fontfile='{FONT}':text='{esc(line)}':fontcolor={colour}:"
+            f"fontsize={fontsize}:expansion=none:x=(w-text_w)/2:y={y}")
+
+
 def card(ff, title, subtitle, secs, out):
-    f = (f"drawtext=fontfile='{FONT}':text='{esc(title)}':fontcolor=white:fontsize=44:"
-         f"x=(w-text_w)/2:y=(h/2)-70,"
-         f"drawtext=fontfile='{FONT}':text='{esc(subtitle)}':fontcolor=0x9FB3C8:fontsize=26:"
-         f"x=(w-text_w)/2:y=(h/2)+10")
-    run(ff, ["-f", "lavfi", "-i", f"color=c={BG}:s={W}x{H}:r={FPS}:d={secs}", "-vf", f], out)
+    tl, tsz = wrap(title, 44, 2)
+    sl, ssz = wrap(subtitle, 26, 2)
+    parts = []
+    # the title block sits above the midline, the subtitle below it, whatever the line counts
+    y = H // 2 - 40 - len(tl) * (tsz + 10)
+    for line in tl:
+        parts.append(_text(line, tsz, "white", y))
+        y += tsz + 10
+    y = H // 2 + 10
+    for line in sl:
+        parts.append(_text(line, ssz, "0x9FB3C8", y))
+        y += ssz + 8
+    run(ff, ["-f", "lavfi", "-i", f"color=c={BG}:s={W}x{H}:r={FPS}:d={secs}", "-vf",
+             ",".join(parts)], out)
 
 
 def clip(ff, src, speed, caption, secs, out):
@@ -58,7 +105,7 @@ def clip(ff, src, speed, caption, secs, out):
     if caption:
         vf.append(f"drawbox=x=0:y=h-64:w=iw:h=64:color=black@0.55:t=fill")
         vf.append(f"drawtext=fontfile='{FONT}':text='{esc(caption)}':fontcolor=white:"
-                  f"fontsize=26:x=28:y=h-46")
+                  f"fontsize=26:expansion=none:x=28:y=h-46")
     args = ["-i", str(src), "-vf", ",".join(vf)]
     if secs:
         args += ["-t", str(secs)]
