@@ -204,10 +204,11 @@ def main():
             rows.append(row)
             print(json.dumps(row), flush=True)
             if args.out:
-                # mkdir first: a run into a fresh output directory used to complete every trial and then
-        # throw FileNotFoundError writing the results away (job 325, session 7 -- 20 trials lost).
-        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
-        Path(args.out).write_text(json.dumps(rows, indent=0))
+                # mkdir first: a run into a fresh output directory used to complete every trial and
+                # then throw FileNotFoundError writing the results away (job 325, session 7 -- 20
+                # trials lost).
+                Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+                Path(args.out).write_text(json.dumps(rows, indent=0))
     if args.grounding == "vlm":
         # Never leave the card held: twice this session a model process outlived its job and the
         # queue runner -- which waits for a free GPU by design -- stalled behind it.
