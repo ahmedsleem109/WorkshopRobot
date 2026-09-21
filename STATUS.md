@@ -1,9 +1,9 @@
 # STATUS — "Bring me the 10mm wrench"
 
-Last updated **2026-09-20, end of session 6.** This file is the CURRENT state only. Superseded
+Last updated **2026-09-21, session 7 (in flight -- see "NEXT SESSION (8)" for what is running).** This file is the CURRENT state only. Superseded
 session narratives live in `docs/STATUS_archive.md`; nothing was deleted, only moved.
 
-Read this section and "NEXT SESSION (7)". `REMAINING.md` holds the full sub-task lists.
+Read this section and "NEXT SESSION (8)". `REMAINING.md` holds the full sub-task lists.
 
 ---
 
@@ -18,8 +18,10 @@ over — recovering from a missing tool, a dropped tool, an ambiguous name and a
 | Grasp, on legs, 5 tools | **125/125** |
 | Place, on legs, both tables | 120/125 (A), 124/125 (B) |
 | Grounding `locate()` | **miss 2.8%**, median xy **10.7 mm**, success 135/180 (75%) |
-| End-to-end, 7 suites x 10 seeds | **60/70 (86%)** |
-| Learned policy (T7 SmolVLA) | **grasp 1/20 — a measured negative, fully diagnosed** |
+| End-to-end, 7 suites x 10 seeds | **60/70 (86%)** -- being re-run on the fixed step policy (job 445) |
+| Locomotion gate 2 (0.12 m step, arm extended) | **0 falls / 20** (was 19/20) -- session 7 |
+| Learned policy, overfit control on memorised scenes | **grasp 5/10, correct object 10/10** (was 0/20) |
+| Learned policy (T7 SmolVLA), held out | **0/20 -- the failure is located: action scale, see session 7** |
 | Media | 90.8 s montage cut (`media/montage.mp4`) |
 
 **The single thing capping the system:** 8 of the 10 end-to-end failures are the base falling on
@@ -84,6 +86,74 @@ prompt/verify question, and the 32 rendered seeds in `runs/t8_views` re-score it
 - `runs/vla_delta`, `vla_overfit`, `vla_delta_long` hold ~20 GB of checkpoints; prune to the
   evaluated ones.
 - T10 scenario 5 retarget is 6/10; 3 of those are the step again.
+
+---
+
+## NEXT SESSION (8) -- the queue is running unattended; here is how to pick it up
+
+**First three commands.** Nothing here needs the GPU:
+
+```
+type runs\queue\status.json                  what is running right now
+type runs\queue\history.log                  what finished, with exit codes and durations
+dir ops\queue\pending                        what is still to come, in filename order
+```
+Job output is `runs/queue/<job>.log`; locomotion training logs are `~/bringwrench/logs/*.log` in WSL.
+`ops/queue_runner.ps1` runs one job at a time, waits for a cool and free card, and survives the shell
+that enqueued it -- so the pipeline continues between sessions. If `runs/queue/status.json` says
+`stopped`, the runner exited: delete `ops/queue/stop` if present and start it again with
+`powershell -NoProfile -ExecutionPolicy Bypass -File ops\queue_runner.ps1`.
+
+### The queue, and what each job is for
+
+| job | proves |
+|---|---|
+| `428` resume `payload_nav_l5` | the step curriculum inside the NAV lineage (the deployable one) |
+| `440` export + `nav_tracking` | **decision point** -- see below |
+| `445` swap policy, re-run 7 suites | whether gate 2's pass moves end-to-end off 60/70 |
+| `448` missing + nominal on REAL VLM grounding | the price of the absent-tool tier end to end |
+| `450` train `vla_fine_pick` (20k steps) | the corrected VLA: fine phase + pick only + quantile norm |
+| `455` eval that checkpoint | **the VLA verdict**, against predictions written into the job file |
+| `460-480` clean+noise union | parked fallback; covariate shift was never the binding constraint |
+
+### Two decisions waiting, with their rules already fixed
+
+**After 440 -- do NOT swap blindly.** `scripts/nav_tracking.py` must still show turn in place, back up
+and sidestep. This run changed the curriculum (level_init 4 -> 5) under the policy the whole pipeline
+depends on for those three skills, and nav2/nav3's history is a string of runs that walked forward
+beautifully and could not turn. If tracking regressed: keep `payload_nav_policy_nav3.npz` for the
+route and use the new policy only for the `via_step` leg -- the orchestrator already switches per
+phase. Job 445 keeps the old policy beside the new one, so reverting is one copy.
+
+**After 455 -- the predictions are in the job file.** j1 and j5 must beat the no-motion baseline, and
+grasp must exceed 0/20. NOTE the lesson from the control: the ratio-to-baseline metric is the WRONG
+yardstick. j1 sat at parity with "do nothing" while the policy grasped 5/10, because what changed was
+the absolute error, 0.0289 -> 0.0038 rad (about 15 mm -> 2 mm at the gripper). Read millimetres
+against the task tolerance, not ratios.
+
+### Do not re-derive these; each cost GPU hours to establish
+
+* The VLA's failure is ACTION SCALE, and it had two independent causes -- the transport swing (91% of
+  j1's squared motion) and pick+place sharing one normaliser while place carries 2.4 rad IK jumps.
+* Eliminated by measurement: capacity (overfit control 3.8x), pipeline and serving path, the delta
+  representation (expert replay 8/8), covariate shift and generalisation (0/20 on TRAINING scenes),
+  the stance mismatch (fixed), the image domain gap (PSNR 39 dB), and the chunk horizon (we serve 10,
+  which LeRobot's own issue #4614 shows is already the good setting).
+* `n_action_steps=50` would cost ~20 points; 10 and 1 are equivalent. Leave it at 10.
+* The training success EMA of a stairs run says nothing about gate 2: it scores the level-5 task
+  (0.130 m), the gate is 0.120 m. Reading it cost a wrong "negative" call this session.
+
+### Still open after the queue drains
+
+1. The `scripts/` reorganisation in `docs/REPO_LAYOUT_PLAN.md` -- deliberately deferred because the
+   queued jobs reference those paths. Execute it in one commit with the `ops/` and doc references.
+2. The place tail: 119/125 on table A, and the residual is the wrench's post-release travel with a
+   walked base. The one obvious lever (dropping the 45 mm aim shift) was A/B'd and made it worse.
+3. The screwdriver is the only tool that fails across layers (0/3 in the VLA control, worst in place).
+   Targeted demos, and keep it visible per-tool rather than inside an average.
+4. Five scan views instead of three for grounding: corroboration is the signal that works, and with
+   three views 67 of 180 targets can never get it.
+5. Outreach, which is Ahmed's call, not an agent's.
 
 ---
 
