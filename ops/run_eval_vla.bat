@@ -27,6 +27,17 @@ set RENDER_PY=D:\hexapod\render_venv\Scripts\python.exe
 echo [1/3] starting the policy server on %CKPT% ...
 start "bw-vla-server" wsl.exe -e bash -lc "bash /mnt/d/bringwrench/ops/vla_server.sh ~/bringwrench/runs/%RUN%/checkpoints/%CKPT%/pretrained_model cuda %ACTSTEPS% %DELTA%"
 
+REM The delays below are `ping -n N+1 127.0.0.1`, not `timeout /t N`, for two independent
+REM reasons -- either one alone breaks the wait:
+REM   1. Git Bash and WSL both put a GNU coreutils `timeout` on PATH, which rejects /t with
+REM      "invalid time interval" and returns instantly.
+REM   2. Windows' own timeout.exe refuses to run at all when stdin is redirected ("Input
+REM      redirection is not supported") -- which is exactly how the queue runner invokes a job,
+REM      so even the absolute path does not help here.
+REM Consequence when broken: this poll loop burned all 60 retries in a few seconds and the
+REM cleanup loop never waited between kill attempts -- how a server outlived its job on
+REM 2026-09-20, held 1.76 GB of VRAM and wedged the queue. It only appeared to work because
+REM PowerShell's own startup cost happened to exceed the model's load time (found in job 455).
 echo [2/3] waiting for it to load (~40 s) ...
 set /a TRIES=0
 :wait
@@ -34,7 +45,7 @@ powershell -NoProfile -Command "try{ Invoke-WebRequest -UseBasicParsing http://1
 if not errorlevel 1 goto ready
 set /a TRIES+=1
 if %TRIES% GEQ 60 (echo    server did not become healthy -- check the bw-vla-server window & goto cleanup)
-timeout /t 5 /nobreak >nul
+ping -n 6 127.0.0.1 >nul
 goto wait
 
 :ready
@@ -49,7 +60,7 @@ echo stopping the policy server ...
 set /a KILLTRY=0
 :kill
 wsl.exe -e bash -lc "pkill -f 'vla_server[.]py'" >nul 2>&1
-timeout /t 3 /nobreak >nul
+ping -n 4 127.0.0.1 >nul
 powershell -NoProfile -Command "try{ Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8766/health -TimeoutSec 2 | Out-Null; exit 0 } catch { exit 1 }"
 if errorlevel 1 goto killed
 set /a KILLTRY+=1
