@@ -8,7 +8,7 @@
 set -e
 L5=$HOME/bringwrench/runs/results/2026-09-18_12-19-23-payload_l5/checkpoints/step_4587520
 STEPS=${1:-5500000}
-[ -d "$L5" ] || { echo "no checkpoint at $L5"; exit 1; }
+[ -e "$L5" ] || { echo "no checkpoint at $L5"; exit 1; }
 mkdir -p ~/bringwrench/runs ~/bringwrench/logs
 cd ~/bringwrench/runs
 pkill -f 'bw[.]locomotion[.]train_payload' || true
