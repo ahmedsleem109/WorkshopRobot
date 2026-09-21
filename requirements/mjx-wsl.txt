@@ -1,0 +1,12 @@
+# Layer 3 -- locomotion training (MJX/brax on the GPU) and the Phase 1 gate. WSL2 + CUDA.
+#   python -m venv .venv && .venv/bin/pip install -r requirements/mjx-wsl.txt
+# jax must match the local CUDA; install jax[cuda12] from the official index rather than pinning a
+# wheel here if this list fails on your driver.
+mujoco==3.11.0
+mujoco-mjx==3.11.0
+jax==0.10.0
+jaxlib==0.10.0
+brax==0.14.2
+flax==0.12.8
+optax==0.2.8
+numpy==2.5.1

@@ -1,0 +1,10 @@
+# Layer 2 -- SmolVLA fine-tuning and the policy server. WSL2 + CUDA, ~4.5 GB VRAM in training.
+#   python -m venv .venv-vla && .venv-vla/bin/pip install -r requirements/vla-wsl.txt
+# NOTE lerobot 0.6.1 writes LeRobotDataset v3.0, not v2.0 (the plan's text says v2.0).
+torch==2.11.0
+lerobot==0.6.1
+transformers==5.5.4
+accelerate==1.15.0
+av==15.1.0
+numpy==2.2.6
+safetensors==0.8.0
