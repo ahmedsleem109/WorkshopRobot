@@ -1,7 +1,12 @@
 """Render one full orchestrator run: typed command -> state machine -> delivery.
 
-    render_venv\\Scripts\\python.exe scripts\\make_orch_video.py "bring me the 10mm wrench" SEED OUT.mp4
-        [--suite nominal|drop|ambiguous|missing|transfer] [--backend scripted|vla] [--grounding oracle|vlm]
+    render_venv\\Scripts\\python.exe scripts\\make_orch_video.py SEED OUT.mp4
+        [--suite nominal|drop|ambiguous|missing|transfer] [--backend scripted|vla]
+        [--grounding oracle|vlm] [--camera track]
+
+The command is NOT an argument -- the suite and seed generate it, through the same trial
+setup eval_suite.py uses, so a rendered clip is the same trial the suite scored under
+that seed.
 
 Main view: the robot's tracking camera; inset: the wrist camera (what grounding and the VLA
 see). Caption: the command, the orchestrator's current state, and anything asked of the human.
