@@ -448,3 +448,148 @@ D:\hexapod\render_venv\Scripts\python.exe scripts\score_locate.py runs\t8_views 
 In code: `from bw.perception.locate import locate; L = locate(sim, "10mm wrench")` ->
 `L.world`, `L.base` (base frame), `L.n_views`, or `None`. STOP the server when done
 (`pkill -f 'perception/vlm_server[.]py'`) -- it holds 4.3 GB (bf16).
+
+---
+
+## SESSION 6 (2026-09-20) -- obstacle recovery fixed; T7 re-run; the step is the last blocker
+
+### 1. T10 #3 obstacle recovery: 0/2 -> 9/10 (three separate defects, all measured)
+The scenario drops a 0.6 m box on the route to table B the moment the tool is in the jaws.
+Session 5 left this at 0/2 with "the navigator cannot free the base from contact with the box".
+It was not one bug:
+
+1. **The box lands BEHIND the robot**, so the walk stalls in `walk_to`'s opening *backup* --
+   and the old recovery drove backwards (`back_off`), i.e. further into it, then estimated the
+   obstacle along the base HEADING, which pointed at clear floor. `walk_to` now records the
+   first phase that timed out and the body-frame command it was asking for (`stall` in its
+   result), and the blockage is projected along THAT direction. Measured: the estimate lands
+   at (2.99, -0.14) against a true box centre of (3.15, -0.28).
+2. **The detour waypoint was unchecked geometry.** A fixed +-0.9 m off the midpoint of the
+   original line puts it at (4.06, -1.37) -- hard against the walkway's right edge in the bench
+   corner -- and the walk there fell. New `bw/locomotion/local_plan.py` plans over the
+   STANDABLE surface only (walkway + table B's landing strip, shrunk by a base margin; off it
+   is the 12 cm drop) and treats clearance as a soft cost, because where the box is, is a guess.
+3. **A detour point was walked as a STATION**, so it got the full backup -> `far` -> `pre` ->
+   creep -> trim ritual and was approached down a line running from BEHIND it; one run ended at
+   x = 5.2, off the walkway entirely. `walk_to` now takes `via=True`: turn, walk, face the
+   goal, nothing else. The last leg of a detour is the station's own approach point, so the
+   walk that follows is the short hop and never re-runs the blocked `far`/`pre` line.
+
+Also: the detour's legs turn CLOCKWISE only (`turn_sign=-1`). With a tool held the mirrored
+left turn fell 3/3 in session 5, and a detour's first move is a big in-place turn by
+construction.
+
+**A fourth defect, found after the rng fix below made the suite reproducible:** the detour then
+worked (both legs landing < 70 mm from their waypoints) but the final 0.55 m hop onto station B
+**fell off the walkway**, ending at x 3.19, y -1.60 -- and at that y the standable surface is only
+the spur under table B, x 2.25-3.15. A single `fine*_along` burst ran until the whole along error
+was consumed, up to its 4 s cap (over a metre at V_CREEP), with no lateral re-check inside it, so
+sideways drift accumulated unmeasured: it drifted 0.43 m sideways while closing 0.59 m forward.
+`STEP_ALONG = 0.25` now ends a burst after a quarter metre of travel so the loop re-measures
+lateral error and corrects that first (`FINE_ROUNDS` 6 -> 8 to leave room for the extra segments).
+That also removed the obstacle suite's place-outside-zone loss, since the place skill plans from
+the live base pose.
+
+| obstacle suite | |
+|---|---|
+| session 5 | 0/2 |
+| detour + local planner | 7/10 (2 falls on the final hop, 1 outside the zone) |
+| **+ the along-burst cap** | **10/10** |
+| transfer, as a regression check on the same change | 9/10 before, 9/10 after |
+
+### 2. The end-to-end suite, and a bug in how it was being measured
+**A seed did not identify a trial.** `trial()` reseeded the SCENE per trial but not the
+ORCHESTRATOR: `Orchestrator.rng` drives every scripted skill's randomised move durations and it
+carried on from wherever the previous trial left it. So an outcome depended on which trials had
+run before it in the same process. Measured, same code and same seeds:
+- `--suite drop` alone scores 9/10; `--suite transfer,drop` scores drop **6/10**.
+- retarget seed 5 fails inside a 10-seed batch and **passes on its own** (delivered, handoff ok).
+
+Session 5's 130-trial table was one process, so its per-suite numbers carry this noise. Fixed in
+`scripts/eval_suite.py`: `orch.rng` is now reseeded per trial from the trial seed, so every
+trial is reproducible in isolation. `ops/run_eval_suites.sh` additionally runs ONE PROCESS PER
+SUITE, and `scripts/eval_summary.py` tabulates the dumps.
+
+The table below is measured AFTER that fix, on the code with the obstacle recovery and the
+along-burst cap in place -- one process per suite, `orch.rng` reseeded per trial.
+
+| suite (10 seeds each, fresh process, per-trial rng) | success | failure causes |
+|---|---|---|
+| nominal (bring-me) | 8/10 | 2 falls on `via_step` |
+| transfer | 9/10 | 1 placed outside the zone |
+| missing tool | 10/10 | -- |
+| mid-carry drop | 9/10 | 1 fall on `via_step` |
+| ambiguous "wrench" | 8/10 | 2 falls on `via_step` |
+| retarget | 6/10 | 3 falls on `via_step`, 1 grasp |
+| obstacle | **10/10** | -- |
+| **total** | **60/70 (86%)** | |
+
+**8 of the 10 failures are the `via_step` leg** -- the 12 cm step DOWN off the walkway with a
+tool held. The other two are one placement outside the zone and one grasp. This is T3.5 and
+nothing else; the manipulation and grounding layers did not lose a trial to their own skills.
+
+### 3. T7 full fine-tune re-run
+`ops/train_vla.sh vla_full 6000 16 bw_demos 3000` on the 1,128-episode dataset: loss 0.67 ->
+**0.125 by step 3,900** of 6,000 at 1.07 s/step, 4.53 GB VRAM, GPU 70 C. The step-3,000
+checkpoint is saved, so T7.4 (checkpoint selection on the eval metric) has two candidates.
+NOTE: `ops/*.sh` live on /mnt/d, NOT in ~/bringwrench -- `bash ops/train_vla.sh` from the WSL
+home fails with "No such file or directory"; use `bash /mnt/d/bringwrench/ops/train_vla.sh`.
+A `nohup`ed job does NOT survive the `wsl.exe -e` session that started it; keep the session open.
+
+### 4. T12 montage cut
+`scripts/make_montage.py` cuts `media/montage.mp4` -- 90.8 s, 4.7 MB: title, grasp (3 tools),
+payload gait, table-to-table transfer, bring-me end to end, drop recovery, and a closing card
+of the measured numbers. Re-run it after new clips are rendered; it is cheap and declarative.
+
+### 5. Written and ready, not yet run (the GPU was busy training all session)
+- `ops/resume_payload_l5.sh` -- T3.5. `payload_l5` stopped at 4,587,520 of 10M (success 0.25 at
+  level 5, reward 2646). train.py has no resume flag, so a resume is a warm start from
+  `.../payload_l5/checkpoints/step_4587520` with the remaining budget; `level_init: 5` in the
+  config puts the curriculum back where it was.
+- `scripts/_pliers_probe.py` -- T8. Scores candidate phrasings for the pliers ("red pliers",
+  "pliers with red handles", "tool with two red handles", ...) by refusal rate and on-tool rate
+  over the views where the pliers are genuinely visible, bypassing `vlm.ALIASES` so the literal
+  phrase reaches the model. The control phrase "pliers" is refused outright ("There are none.")
+  in 17 of 24 stored replies over seeds 0-7.
+
+
+### 6. T7, why it does not grasp -- the diagnosis, in the order it was established
+Every variant scores **grasp 1/20** on the fixed 20-seed protocol. What changed across the
+session is not the score but the understanding, and each step was a measurement, not a guess.
+
+| model | epochs | one-step prediction vs its trivial baseline | grasp |
+|---|---|---|---|
+| absolute, 6k steps | 0.92 | **2.10x WORSE** | 1/20 |
+| delta, 3k steps | 0.46 | 1.20x worse | 0/20 |
+| delta, 20k steps (6 GPU h) | 3.0 | **1.68x BETTER** | 1/20 |
+| overfit: 40 episodes, 3k steps | 11.7 | **3.8x BETTER** | -- |
+
+1. **Training loss cannot see this failure.** The absolute run reached loss 0.115 and could not
+   grasp. `scripts/vla_replay_check.py` was written to measure what loss cannot: the policy's
+   error on its OWN training frames, through the SERVING path, in radians, against two
+   references -- the spread of the recorded actions, and the trivial predictor (hold the current
+   joint position / command no motion).
+2. **Conditioning was wrong.** Absolute joint targets mean the per-step motion (~0.026 rad) is
+   only 4-8% of the action spread the normaliser divides by (0.28-0.68 rad). The absolute policy
+   predicted training actions to +-0.054 rad -- TWICE the motion it had to produce, and worse
+   than doing nothing. `to_lerobot.py --delta` records `q_cmd - q_state` instead (gripper stays
+   absolute); measured, that rescales the target by **7-17x per joint** and the policy went to
+   1.68x BETTER than its baseline. The serving convention is reported on `/health` so client and
+   dataset cannot silently disagree.
+3. **Capacity and pipeline are NOT the problem.** The overfit test -- 40 pick episodes seen 11.7
+   times -- predicts 3.8x better than baseline on every joint. The architecture, the data
+   pipeline, the delta representation and the serving path all work.
+4. **What is left is COVARIATE SHIFT.** One-step prediction improved 3.5x while closed-loop
+   success did not move at all. The two measure different things: prediction is scored on
+   training-distribution frames, the eval is scored on 14 s of closed loop in held-out scenes.
+   Every demonstration came from a SCRIPTED controller, so the data is nearly noise-free and
+   covers a narrow tube of state space with **no recovery states in it** -- the demonstrator
+   never made a mistake. The policy can reproduce that tube (step 3) and cannot return to it
+   once outside.
+   Testing this means re-collecting with noise injected into the demonstrator, which is a data
+   change, not a training change. That is the next experiment, and it is NOT more GPU hours.
+
+Also open, from the same numbers: j1 and j5 are the only joints that never beat the baseline,
+in BOTH delta runs independently -- worth understanding before the next collection.
+
+---

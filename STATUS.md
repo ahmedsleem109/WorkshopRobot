@@ -1,9 +1,9 @@
 # STATUS — "Bring me the 10mm wrench"
 
-Last updated **2026-09-21, session 7 (in flight -- see "NEXT SESSION (8)" for what is running).** This file is the CURRENT state only. Superseded
+Last updated **2026-09-21, session 8 (complete -- the queue drained; see "NEXT SESSION (9)").** This file is the CURRENT state only. Superseded
 session narratives live in `docs/STATUS_archive.md`; nothing was deleted, only moved.
 
-Read this section and "NEXT SESSION (8)". `REMAINING.md` holds the full sub-task lists.
+Read this section and "NEXT SESSION (9)". `REMAINING.md` holds the full sub-task lists.
 
 ---
 
@@ -17,18 +17,23 @@ over — recovering from a missing tool, a dropped tool, an ambiguous name and a
 |---|---|
 | Grasp, on legs, 5 tools | **125/125** |
 | Place, on legs, both tables | 120/125 (A), 124/125 (B) |
-| Grounding `locate()` | **miss 2.8%**, median xy **10.7 mm**, success 135/180 (75%) |
-| End-to-end, 7 suites x 10 seeds | **60/70 (86%)** -- being re-run on the fixed step policy (job 445) |
-| Locomotion gate 2 (0.12 m step, arm extended) | **0 falls / 20** (was 19/20) -- session 7 |
-| Learned policy, overfit control on memorised scenes | **grasp 5/10, correct object 10/10** (was 0/20) |
-| Learned policy (T7 SmolVLA), held out | **0/20 -- the failure is located: action scale, see session 7** |
-| Media | 90.8 s montage cut (`media/montage.mp4`) |
+| Grounding `locate()`, oracle-scored | miss **2.8%**, median xy **10.7 mm**, 135/180 (75%) |
+| Grounding, MISSING tool on real VLM | **9/10** -- but nominal drops 10/10 -> **3/10** (session 8) |
+| End-to-end, 7 suites x 10 seeds | **60/70 (86%)** -- a swap was tried and REVERTED, see below |
+| Gate 2 (0.12 m step, arm extended), `payload_l5b` | **0 falls / 20** -- but this lineage cannot turn |
+| Gate 2, the DEPLOYABLE lineage `payload_nav_l5b` | **12 falls / 20 -- FAIL** (session 8) |
+| Push recovery, arm extended, `payload_nav_l5b` | **320 N** (original 200 N, `payload_l5b` 240 N) |
+| Learned policy (T7 SmolVLA), held out | **grasp 18/20, correct object 20/20** (was 0/20) |
+| Media | 146 s montage: 5 tools carried, 5 recovery modes (`media/montage.mp4`) |
 
-**The single thing capping the system:** 8 of the 10 end-to-end failures are the base falling on
-the 12 cm step DOWN off the walkway while carrying a tool. Nothing else loses a trial to its own
-skill.
-
----
+**The single thing capping the system, now with direct evidence:** the base FALLS on the 12 cm
+step DOWN off the walkway while carrying a tool. This was asserted from session 3 on the strength
+of the `nav_dest_failed` cause label, which is written by two different branches of the state
+machine -- one for a fall, one for a stable walk that does not arrive -- so the label alone could
+never prove it. `eval_suite.py` now records `loco.is_stable()` and the per-leg `fell` flag that
+`navigate_to` was already computing. Re-run 2026-09-21: both nominal failures come back
+`stable=False`, `fell=True` on the `via_step` leg, 749 mm short, tool still in the jaws. The
+claim was right; it is now measured rather than inferred.
 
 ## TASK BOARD
 
@@ -40,126 +45,260 @@ skill.
 | **T1** grasp demonstrator | 5 tools, 125/125 on legs; the creep, tape radial grasp, stand-lock | "Measured numbers" |
 | **T2.1-T2.5** two tables, reach, spec, language | table B + zones, stations, one `evaluate()`, paraphrases | `bw/sim/`, `bw/task/` |
 | **T3** payload locomotion fine-tune | 33M steps, attitude terminations 0.20 -> 0.05 | "Phase 1 gate" |
-| **T4** Phase 1 gate + ablation | gate 2 FAILS at 12 cm; the height sweep is the publishable result | "Step-height sweep" |
+| **T4** Phase 1 gate + ablation | gate 2 FAILS at 12 cm; the height sweep is the publishable result, now across three lineages | session 8 §2 |
 | **T5** controller parity | controller == MJX element-wise (action diff 1.8e-6) | archive |
 | **T6** demonstrations | **1,128 episodes / 104k frames**, LeRobot v3.0, paraphrased per episode | `scripts/collect_demos.py` |
 | **T9** orchestrator | state machine on observable gates, pluggable skills | `bw/orchestrator.py` |
 | **T10** recovery 1/2/4/5 | missing tool, mid-carry drop, ambiguous name, retarget | `scripts/eval_suite.py` |
 | **T10 #3** obstacle | **0/2 -> 10/10**: stall-direction estimate, local planner, `via` mode, burst cap | session 6 §1 |
 | **T11** end-to-end suite | **60/70 (86%)**, one process + one rng per trial | `runs/eval/s7b/` |
-| **T7** SmolVLA | **negative, diagnosed**: 1/20 for every variant; loss is blind, conditioning fixed, capacity proven, covariate shift remains | session 6 §6 |
+| **T7** SmolVLA | **POSITIVE**: grasp **18/20** held out, correct object 20/20, from 0/20 -- fine phase + pick-only + quantile norm | session 8 §1 |
 | ops | job queue runner, verified server shutdown, delta pipeline with `/health` handshake | `ops/queue_runner.ps1` |
 
 ### REMAINING, IN THE ORDER WORTH DOING
 
-**1. T3.5 — the step-down policy. The only item with real headroom.**
-It caps everything: 8 of 10 end-to-end failures, and it is the difference between 86% and the
-mid-90s. `payload_l5` stopped at 4,587,520 of 10M steps and was never evaluated (success 0.25 at
-level 5, reward 2646). Everything is written and waiting.
-```
-wsl.exe -e bash -lc "bash /mnt/d/bringwrench/ops/resume_payload_l5.sh"     # ~5.5M steps
-```
-Then re-run the height sweep, then `bash ops/run_eval_suites.sh 10 runs/eval/s8`.
+**1. T3.5 — the step-down policy. Still the only item with real headroom, and session 8 narrowed
+it to one question.**
+The step is confirmed as the binding failure (see above). The awkward part is that it IS solved,
+in a lineage that cannot be deployed:
+
+| | gate 2 @ 0.12 m | turn / back / sidestep | end-to-end |
+|---|---|---|---|
+| `stairs_run7` (original) | 19 falls / 20 | yes | — |
+| `payload_l5b` (forward-only, session 7) | **0 falls / 20** | **no** | cannot ship |
+| `payload_nav_l5b` (nav + level 5, session 8) | 12 falls / 20 | **yes**, within 8% | **28/70, reverted** |
+
+So level-5 curriculum training under the FULL command distribution bought the best disturbance
+rejection on the project (320 N extended, vs 200 N original) and did **not** buy the step. Those
+are separable capabilities. The open question is how to get `payload_l5b`'s step robustness into
+a policy that can also turn — candidates, none tried: train nav from the `payload_l5b` weights
+rather than from nav3; keep two policies and switch per phase (the orchestrator already switches
+per phase, and reverting is one file copy); or weight the forward-command mass higher at level 5
+instead of sampling the full distribution uniformly.
 Already tried and measured, do NOT repeat: `stow_arm()` (needed, kept), a via-waypoint past the
 step (17/20, vs 16/24 crossing at full speed), tucking the tool further in (7/12), clockwise-only
-turns (needed).
+turns (needed), and now **training the step curriculum directly in the nav lineage (28/70)**.
 
-**2. T12 — write it up. The project is at a reportable state and the story is strong.**
-`README.md` and `docs/blog.md` are drafted and need the session-6 numbers. The T7 negative with
-its diagnostic chain is a better contribution than a mediocre positive would have been. The
-montage is cut; re-cut it with a T3.5 clip once that lands (`scripts/make_montage.py`).
+**2. T7 is no longer a negative. Write it up as the diagnostic chain it is.**
+0/20 -> **18/20 on held-out scenes**, 100% correct object, from three stacked corrections with a
+measurement behind each (fine phase, pick-only, quantile normalisation). See session 8 §1.
+What it does NOT do: place (0/20, excluded from training by design) and the second grasp after a
+tool swap (0/20 held out, 1/20 on training scenes) — that last one is unexplained and is the
+first thing to look at if T7 is pushed further.
 
-**3. T7 — the covariate-shift experiment. The only untested hypothesis, and it is a DATA change.**
-Every demonstration came from a scripted controller, so the data is nearly noise-free and holds
-no recovery states. More GPU on the same dataset cannot test this. Inject noise into the
-demonstrator, re-collect, convert with `--delta`, retrain. Budget ~2 h collect + 25 min convert +
-6 h train. Only worth it if a working VLA is a requirement rather than a nice-to-have.
+**3. T12 — write it up. The project is at a reportable state and the story got better.**
+`README.md` and `docs/blog.md` need session-8 numbers. The montage is re-cut with real end-to-end
+footage (`scripts/make_montage.py`). The honest headline is 60/70 with a confirmed, located
+bottleneck — not the mid-60s that was hoped for and did not happen.
 
-**4. Grounding: 70% false positives on ABSENT tools.**
-`locate()` points at something when the tool is not there (14/20). T10 #1 "report a missing tool"
-only passes today because `eval_suite.py` defaults to `--grounding oracle`. Fixing it is a
-prompt/verify question, and the 32 rendered seeds in `runs/t8_views` re-score it cheaply.
+**4. Grounding: the absent-tool tier works, and costs more than it saves.**
+On real VLM the missing-tool scenario is 9/10 (it had been passing only because the suite defaults
+to `--grounding oracle`). But nominal falls from 10/10 to **3/10**, all seven failures being
+`locate()` calling a present tool absent. A ~70% false-positive rate on absent tools became a
+~70% false-negative rate on present ones. The operating point needs moving, not the mechanism.
 
 **5. The tail, in one sitting.**
 - 1 transfer in 10 puts the tool outside the zone (the place distribution's tail).
-- j1 and j5 are the only joints that never beat the no-motion baseline, in BOTH delta runs.
+- j1 and j5 now BEAT the no-motion baseline (session 8) — that item is closed.
 - `runs/vla_delta`, `vla_overfit`, `vla_delta_long` hold ~20 GB of checkpoints; prune to the
-  evaluated ones.
+  evaluated ones. Ahmed's call: an agent deliberately did not delete these.
 - T10 scenario 5 retarget is 6/10; 3 of those are the step again.
+- `wrench_13mm` is the ONLY tool with no nominal success: seeds 1 and 6 are the two nominal
+  failures and both are that tool, reproduced independently twice. Worth one look.
 
----
+## NEXT SESSION (9) -- the queue is DRAINED and the runner is idle
 
-## NEXT SESSION (8) -- the queue is running unattended; here is how to pick it up
-
-**First three commands.** Nothing here needs the GPU:
+Session 8 ran 26 jobs and emptied the queue. Nothing is in flight. First three commands:
 
 ```
-type runs\queue\status.json                  what is running right now
-type runs\queue\history.log                  what finished, with exit codes and durations
-dir ops\queue\pending                        what is still to come, in filename order
+type runs\queue\history.log          what ran, with exit codes and durations
+dir ops\queue\hold                   three jobs parked, and why (below)
+git log --oneline session-8          five branches, merged
 ```
-Job output is `runs/queue/<job>.log`; locomotion training logs are `~/bringwrench/logs/*.log` in WSL.
-`ops/queue_runner.ps1` runs one job at a time, waits for a cool and free card, and survives the shell
-that enqueued it -- so the pipeline continues between sessions. If `runs/queue/status.json` says
-`stopped`, the runner exited: delete `ops/queue/stop` if present and start it again with
-`powershell -NoProfile -ExecutionPolicy Bypass -File ops\queue_runner.ps1`.
 
-### The queue, and what each job is for
+**`ops/queue/hold/` holds 460/470/480, the clean+noise union jobs. Do not run them.** They exist
+to test whether noise-free scripted demonstrations were what stopped the VLA learning. Session 8
+answered that WITHOUT touching the data: the same dataset went 0/20 -> 18/20 once the action
+scale was fixed. They are answered, not deferred. Delete them.
 
-| job | proves |
-|---|---|
-| `428` resume `payload_nav_l5` | the step curriculum inside the NAV lineage (the deployable one) |
-| `440` export + `nav_tracking` | **decision point** -- see below |
-| `445` swap policy, re-run 7 suites | whether gate 2's pass moves end-to-end off 60/70 |
-| `448` missing + nominal on REAL VLM grounding | the price of the absent-tool tier end to end |
-| `450` train `vla_fine_pick` (20k steps) | the corrected VLA: fine phase + pick only + quantile norm |
-| `455` eval that checkpoint | **the VLA verdict**, against predictions written into the job file |
-| `460-480` clean+noise union | parked fallback; covariate shift was never the binding constraint |
+### The one thing worth doing next
 
-### Two decisions waiting, with their rules already fixed
+Get `payload_l5b`'s step robustness into a policy that can also turn. That is the whole of T3.5
+now, and "REMAINING 1" lists the three untried candidates. Everything else is a tail item or
+writing.
 
-**After 440 -- do NOT swap blindly.** `scripts/nav_tracking.py` must still show turn in place, back up
-and sidestep. This run changed the curriculum (level_init 4 -> 5) under the policy the whole pipeline
-depends on for those three skills, and nav2/nav3's history is a string of runs that walked forward
-beautifully and could not turn. If tracking regressed: keep `payload_nav_policy_nav3.npz` for the
-route and use the new policy only for the `via_step` leg -- the orchestrator already switches per
-phase. Job 445 keeps the old policy beside the new one, so reverting is one copy.
+### Two traps this session walked into, written down so the next one does not
 
-**After 455 -- the predictions are in the job file.** j1 and j5 must beat the no-motion baseline, and
-grasp must exceed 0/20. NOTE the lesson from the control: the ratio-to-baseline metric is the WRONG
-yardstick. j1 sat at parity with "do nothing" while the policy grasped 5/10, because what changed was
-the absolute error, 0.0289 -> 0.0038 rad (about 15 mm -> 2 mm at the gripper). Read millimetres
-against the task tolerance, not ratios.
+**`exit=0` means nothing on this machine.** Five separate things reported success while doing
+nothing or the wrong thing: `eval_suite.py` had not parsed since commit fe57f47 (job 448 ran 0 of
+20 trials, filed as `done exit=0`); jobs 330 and 340 were no-ops filed the same way; the montage
+had been silently dropping its closing subtitle to a `%` in the text; `run_eval_vla.bat`'s server
+wait never waited. READ THE LOG, never the exit code. The runner's capture is broken in both
+directions -- it filed job 457's deliberate `exit /b 1` as `done exit=0` too. Fixing that
+(`|| exit /b 1` per line, and having the runner trust `%ERRORLEVEL%`) is the highest-value ops fix
+available.
+
+**A cause label can hide two causes.** `nav_dest_failed` is written by two branches of
+`orchestrator.py` -- one guarded by `not loco.is_stable()` (a fall), one for a stable walk that
+does not arrive. For five sessions the project's headline claim rested on that label. It turned
+out to be RIGHT, but it could not have been known from the label; an interim read this session
+argued the opposite from base positions and was wrong. The row now carries `stable`, `fell_any`
+and the per-leg `nav` record. When a claim matters, instrument it.
 
 ### Do not re-derive these; each cost GPU hours to establish
 
-* The VLA's failure is ACTION SCALE, and it had two independent causes -- the transport swing (91% of
-  j1's squared motion) and pick+place sharing one normaliser while place carries 2.4 rad IK jumps.
-* Eliminated by measurement: capacity (overfit control 3.8x), pipeline and serving path, the delta
-  representation (expert replay 8/8), covariate shift and generalisation (0/20 on TRAINING scenes),
-  the stance mismatch (fixed), the image domain gap (PSNR 39 dB), and the chunk horizon (we serve 10,
-  which LeRobot's own issue #4614 shows is already the good setting).
-* `n_action_steps=50` would cost ~20 points; 10 and 1 are equivalent. Leave it at 10.
+* The VLA's failure WAS action scale, and the fix is three stacked corrections, all needed: fine
+  phase, pick-only, quantile normalisation. 0/20 -> 18/20 held out.
+* Eliminated by measurement: capacity, the pipeline and serving path, the delta representation,
+  covariate shift and generalisation, the stance mismatch, the image domain gap, the chunk
+  horizon. `n_action_steps` stays at 10.
 * The training success EMA of a stairs run says nothing about gate 2: it scores the level-5 task
-  (0.130 m), the gate is 0.120 m. Reading it cost a wrong "negative" call this session.
+  (0.130 m), the gate is 0.120 m. Reading it cost a wrong call in session 7.
+* The VLA's training loss is blind. It fell 0.438 -> 0.065 in the run that worked, and looked the
+  same in every run that did not.
+* One process per suite. Trials are not independent inside a process: `transfer,drop` scored drop
+  6/10 where `drop` alone scored 9/10, same code, same seeds.
+* Windows `timeout /t` cannot be used in a queued job: GNU coreutils shadows it on PATH, AND
+  Windows' own refuses to run under redirected stdin. Use `ping -n N+1 127.0.0.1`.
 
-### Still open after the queue drains
+### Still open
 
-1. The `scripts/` reorganisation in `docs/REPO_LAYOUT_PLAN.md` -- deliberately deferred because the
-   queued jobs reference those paths. Execute it in one commit with the `ops/` and doc references.
-2. The place tail: 119/125 on table A, and the residual is the wrench's post-release travel with a
-   walked base. The one obvious lever (dropping the 45 mm aim shift) was A/B'd and made it worse.
-3. The screwdriver is the only tool that fails across layers (0/3 in the VLA control, worst in place).
-   Targeted demos, and keep it visible per-tool rather than inside an average.
-4. Five scan views instead of three for grounding: corroboration is the signal that works, and with
-   three views 67 of 180 targets can never get it.
+1. The `scripts/` reorganisation in `docs/REPO_LAYOUT_PLAN.md`. The queue is empty now, so the
+   path references it was waiting on are no longer a blocker.
+2. The place tail: 119/125 on table A; the residual is the wrench's post-release travel.
+3. The screwdriver is no longer the worst tool -- it is 4/4 in the VLA eval. `wrench_13mm` is now
+   the outlier (no nominal success, reproduced twice).
+4. Five scan views instead of three for grounding, and the absent-tool operating point.
 5. Outreach, which is Ahmed's call, not an agent's.
 
 ---
 
-## SESSION 7 (2026-09-21) -- in progress: T3.5 in both lineages, the place tail, T7's data test
+## SESSION 8 (2026-09-21) -- T7 reversed; T3.5's deployable lineage failed and was reverted
 
-Written as the work lands; every number below is measured unless it says "running".
+26 queued jobs, no GPU left idle. Every number below is measured.
+
+### 1. T7 IS NO LONGER A NEGATIVE: 0/20 -> 18/20 on held-out scenes
+
+The action-scale diagnosis from session 7 was correct and all three corrections were needed.
+`vla_fine_pick`, 20,000 steps, final loss 0.065.
+
+Replay check through the serving path, 91 frames -- every joint beats the no-motion baseline,
+which j1 and j5 had failed to do in BOTH previous delta runs:
+
+| joint | policy err | no-motion | spread | policy/spread |
+|---|---|---|---|---|
+| j1 | **0.0067** | 0.0101 | 0.0213 | 0.32 |
+| j5 | **0.0053** | 0.0069 | 0.0157 | 0.34 |
+| grip | **0.0011** | 0.0095 | 0.0121 | 0.09 |
+| ALL | 0.0083 | 0.0160 | 0.0304 | 0.27 |
+
+In millimetres at the gripper (the project's own anchor: 0.0289 rad ~ 15 mm), j1 is ~3.5 mm
+against a no-motion 5.2 mm, where the failing run sat at ~15 mm. Read millimetres, not ratios.
+
+End-to-end scoring, `--from-pregrasp --pick-s 7` (the scripted stack transports to the pre-grasp
+pose; the policy does approach, close and lift with 7 s of control):
+
+| | held out | training scenes |
+|---|---|---|
+| grasp | **18/20** | 17/20 |
+| correct object | **20/20** | 20/20 |
+| swap grasp | 0/20 | 1/20 |
+| transfer | 0/20 | 0/20 |
+
+Per tool, held out: wrench_10mm 4/4, wrench_13mm 4/4, screwdriver **4/4**, pliers 3/4,
+tape_roll 3/4. The screwdriver had been the tool that failed across every layer (0/3 in the
+overfit control).
+
+Four caveats, so nobody overclaims this:
+* It does the GRASP, not the task. Transport is scripted; the policy is handed the pre-grasp pose.
+* `transfer` 0/20 is by construction -- place was excluded from training because its 2.4 rad IK
+  jumps set the normaliser. This checkpoint was never asked to place.
+* `swap_grasp` 0/20 is NOT explained by that. First grasp 18/20 and second grasp 0/20 in the same
+  trials, same tools. Unexplained; the first thing to investigate if T7 continues.
+* Prediction 3 ("training scenes are the upper bound") was NOT met -- held out beat training
+  scenes, 18 vs 17. One trial at n=20 with an unmatched tool mix, so: noise. But it means the run
+  gives no usable ceiling. Say "90% held out", not "90% of a known ceiling".
+
+### 2. T3.5: the deployable lineage FAILED the gate, was swapped in anyway, and was reverted
+
+`payload_nav_l5b` (nav command distribution, level_init 5), best checkpoint chosen from the run's
+own eval rows at step 1,638,400 (reward 3732.62 -- the peak is mid-run again; `final` was worse).
+
+Flat-ground tracking is fine and all three pipeline-critical skills survived: turn +0.63/-0.57
+against +/-0.60, back -0.26 against -0.25, sidestep +0.17/-0.18 against +/-0.20, 0 falls in 40
+trials. One anomaly: `slow` tracks **+0.06 against a commanded +0.15**.
+
+The gate, which had never been run on this lineage (job 440 ran flat-ground tracking only):
+
+| height | original | `payload_l5b` | `payload_nav_l5b` |
+|---|---|---|---|
+| 0.10 | 14 | 0 | 1 |
+| 0.11 | 18 | 0 | 8 |
+| **0.12** | **19** | **0** | **12 FAIL** |
+| 0.13 | 20 | 5 | 12 |
+
+Push recovery went the other way and is the best on the project: **280 N stowed / 320 N extended**
+against the original's 160/200 and `payload_l5b`'s 240/240. Disturbance rejection and step
+descent are separable capabilities.
+
+It was swapped in regardless -- the reasoning being that the gate tests the arm EXTENDED while the
+orchestrator stows for transit, so the gate might be harsher than deployment. It was not:
+
+```
+nominal 0/10   drop 0/10   ambiguous 0/10   retarget 0/10     <- every human destination
+transfer 9/10  obstacle 9/10  missing 10/10                   <- every table destination
+TOTAL 28/70 (40%), against a 60/70 baseline
+```
+
+Reverted by hash (`payload_nav_policy.npz` 1dce46bd -> 50c16e82) and verified: nominal back to
+8/10, every success ending at the handoff tray. **The gate said FAIL and the gate was right.** A
+plausible story about why a gate might not transfer is not evidence.
+
+### 3. The step-down claim, finally measured rather than inferred
+
+`nav_dest_failed` conflated a fall with a stable non-arrival, and the project's headline claim had
+rested on that label since session 3. `eval_suite.py` now records `stable`, `fell_any` and the
+per-leg `nav` log -- data `navigate_to` was already computing and throwing away. Re-run: both
+nominal failures come back `fell=True`, `stable=False` on the `via_step` leg, 749 mm short, tool
+still in the jaws. The step IS the bottleneck, and `payload_nav_l5b` took that same fall from
+2/10 to 10/10.
+
+### 4. Grounding on a real VLM: the absent-tool tier works, and costs more than it saves
+
+| | oracle | real VLM |
+|---|---|---|
+| missing | 10/10 | **9/10** |
+| nominal | 10/10 | **3/10** |
+
+All seven nominal failures are `locate()` reporting a present tool absent. A ~70% false-positive
+rate on absent tools became a ~70% false-negative rate on present ones. Median `locate` latency
+9.3 s on nominal against 5.4 s on missing -- the model exhausts its scan views before giving up.
+The operating point needs moving, not the mechanism. (Job 458 straddled the revert: `missing` ran
+under the bad policy, but is policy-insensitive since nothing is delivered.)
+
+### 5. Five things that reported success while doing nothing
+
+`eval_suite.py` had not parsed since fe57f47 -- an `if args.out:` whose body was dedented out from
+under it -- so job 448 ran 0 of 20 trials and was filed `done exit=0`; it would have taken the
+seven end-to-end suites with it. Jobs 330 and 340 were the same shape. The montage's closing card
+had been silently dropping its subtitle, because `drawtext` expands `%` and discards the whole
+string on failure ("2.8% miss"), while its title overflowed the 960 px frame and was clipped at
+both edges. `run_eval_vla.bat`'s 40 s server wait never waited, for two independent reasons, and
+only passed because PowerShell's startup cost accidentally supplied the delay.
+`make_orch_video.py`'s usage line documented an argument it does not take. All fixed.
+
+### 6. Media
+
+`media/montage.mp4` re-cut, 146 s: all five tools carried end to end, and all five recovery modes
+(drop 9/10, obstacle 10/10, ambiguous 8/10, missing 10/10, retarget 6/10), each clip rendered from
+a seed the suite scored as a SUCCESS, with its suite score burned into the caption. Nine source
+clips committed at 9.0 MB (203 MB before compression, matching the repo's existing convention).
+
+---
+
+## SESSION 7 (2026-09-21) -- T3.5 in both lineages, the place tail, T7's data test
+
+Complete. Everything below is measured. What session 7 left running was finished in session 8.
 
 ### 1. T3.5, and a bug that had kept it from ever starting
 `ops/resume_payload_l5.sh` was "written and ready" since session 6 and had never been run. Its own
@@ -312,150 +451,6 @@ until a variant grasps. T7.6 (data-scaling curve) would read 1/20 at every point
 reason.
 
 ---
-
-## SESSION 6 (2026-09-20) -- obstacle recovery fixed; T7 re-run; the step is the last blocker
-
-### 1. T10 #3 obstacle recovery: 0/2 -> 9/10 (three separate defects, all measured)
-The scenario drops a 0.6 m box on the route to table B the moment the tool is in the jaws.
-Session 5 left this at 0/2 with "the navigator cannot free the base from contact with the box".
-It was not one bug:
-
-1. **The box lands BEHIND the robot**, so the walk stalls in `walk_to`'s opening *backup* --
-   and the old recovery drove backwards (`back_off`), i.e. further into it, then estimated the
-   obstacle along the base HEADING, which pointed at clear floor. `walk_to` now records the
-   first phase that timed out and the body-frame command it was asking for (`stall` in its
-   result), and the blockage is projected along THAT direction. Measured: the estimate lands
-   at (2.99, -0.14) against a true box centre of (3.15, -0.28).
-2. **The detour waypoint was unchecked geometry.** A fixed +-0.9 m off the midpoint of the
-   original line puts it at (4.06, -1.37) -- hard against the walkway's right edge in the bench
-   corner -- and the walk there fell. New `bw/locomotion/local_plan.py` plans over the
-   STANDABLE surface only (walkway + table B's landing strip, shrunk by a base margin; off it
-   is the 12 cm drop) and treats clearance as a soft cost, because where the box is, is a guess.
-3. **A detour point was walked as a STATION**, so it got the full backup -> `far` -> `pre` ->
-   creep -> trim ritual and was approached down a line running from BEHIND it; one run ended at
-   x = 5.2, off the walkway entirely. `walk_to` now takes `via=True`: turn, walk, face the
-   goal, nothing else. The last leg of a detour is the station's own approach point, so the
-   walk that follows is the short hop and never re-runs the blocked `far`/`pre` line.
-
-Also: the detour's legs turn CLOCKWISE only (`turn_sign=-1`). With a tool held the mirrored
-left turn fell 3/3 in session 5, and a detour's first move is a big in-place turn by
-construction.
-
-**A fourth defect, found after the rng fix below made the suite reproducible:** the detour then
-worked (both legs landing < 70 mm from their waypoints) but the final 0.55 m hop onto station B
-**fell off the walkway**, ending at x 3.19, y -1.60 -- and at that y the standable surface is only
-the spur under table B, x 2.25-3.15. A single `fine*_along` burst ran until the whole along error
-was consumed, up to its 4 s cap (over a metre at V_CREEP), with no lateral re-check inside it, so
-sideways drift accumulated unmeasured: it drifted 0.43 m sideways while closing 0.59 m forward.
-`STEP_ALONG = 0.25` now ends a burst after a quarter metre of travel so the loop re-measures
-lateral error and corrects that first (`FINE_ROUNDS` 6 -> 8 to leave room for the extra segments).
-That also removed the obstacle suite's place-outside-zone loss, since the place skill plans from
-the live base pose.
-
-| obstacle suite | |
-|---|---|
-| session 5 | 0/2 |
-| detour + local planner | 7/10 (2 falls on the final hop, 1 outside the zone) |
-| **+ the along-burst cap** | **10/10** |
-| transfer, as a regression check on the same change | 9/10 before, 9/10 after |
-
-### 2. The end-to-end suite, and a bug in how it was being measured
-**A seed did not identify a trial.** `trial()` reseeded the SCENE per trial but not the
-ORCHESTRATOR: `Orchestrator.rng` drives every scripted skill's randomised move durations and it
-carried on from wherever the previous trial left it. So an outcome depended on which trials had
-run before it in the same process. Measured, same code and same seeds:
-- `--suite drop` alone scores 9/10; `--suite transfer,drop` scores drop **6/10**.
-- retarget seed 5 fails inside a 10-seed batch and **passes on its own** (delivered, handoff ok).
-
-Session 5's 130-trial table was one process, so its per-suite numbers carry this noise. Fixed in
-`scripts/eval_suite.py`: `orch.rng` is now reseeded per trial from the trial seed, so every
-trial is reproducible in isolation. `ops/run_eval_suites.sh` additionally runs ONE PROCESS PER
-SUITE, and `scripts/eval_summary.py` tabulates the dumps.
-
-The table below is measured AFTER that fix, on the code with the obstacle recovery and the
-along-burst cap in place -- one process per suite, `orch.rng` reseeded per trial.
-
-| suite (10 seeds each, fresh process, per-trial rng) | success | failure causes |
-|---|---|---|
-| nominal (bring-me) | 8/10 | 2 falls on `via_step` |
-| transfer | 9/10 | 1 placed outside the zone |
-| missing tool | 10/10 | -- |
-| mid-carry drop | 9/10 | 1 fall on `via_step` |
-| ambiguous "wrench" | 8/10 | 2 falls on `via_step` |
-| retarget | 6/10 | 3 falls on `via_step`, 1 grasp |
-| obstacle | **10/10** | -- |
-| **total** | **60/70 (86%)** | |
-
-**8 of the 10 failures are the `via_step` leg** -- the 12 cm step DOWN off the walkway with a
-tool held. The other two are one placement outside the zone and one grasp. This is T3.5 and
-nothing else; the manipulation and grounding layers did not lose a trial to their own skills.
-
-### 3. T7 full fine-tune re-run
-`ops/train_vla.sh vla_full 6000 16 bw_demos 3000` on the 1,128-episode dataset: loss 0.67 ->
-**0.125 by step 3,900** of 6,000 at 1.07 s/step, 4.53 GB VRAM, GPU 70 C. The step-3,000
-checkpoint is saved, so T7.4 (checkpoint selection on the eval metric) has two candidates.
-NOTE: `ops/*.sh` live on /mnt/d, NOT in ~/bringwrench -- `bash ops/train_vla.sh` from the WSL
-home fails with "No such file or directory"; use `bash /mnt/d/bringwrench/ops/train_vla.sh`.
-A `nohup`ed job does NOT survive the `wsl.exe -e` session that started it; keep the session open.
-
-### 4. T12 montage cut
-`scripts/make_montage.py` cuts `media/montage.mp4` -- 90.8 s, 4.7 MB: title, grasp (3 tools),
-payload gait, table-to-table transfer, bring-me end to end, drop recovery, and a closing card
-of the measured numbers. Re-run it after new clips are rendered; it is cheap and declarative.
-
-### 5. Written and ready, not yet run (the GPU was busy training all session)
-- `ops/resume_payload_l5.sh` -- T3.5. `payload_l5` stopped at 4,587,520 of 10M (success 0.25 at
-  level 5, reward 2646). train.py has no resume flag, so a resume is a warm start from
-  `.../payload_l5/checkpoints/step_4587520` with the remaining budget; `level_init: 5` in the
-  config puts the curriculum back where it was.
-- `scripts/_pliers_probe.py` -- T8. Scores candidate phrasings for the pliers ("red pliers",
-  "pliers with red handles", "tool with two red handles", ...) by refusal rate and on-tool rate
-  over the views where the pliers are genuinely visible, bypassing `vlm.ALIASES` so the literal
-  phrase reaches the model. The control phrase "pliers" is refused outright ("There are none.")
-  in 17 of 24 stored replies over seeds 0-7.
-
-
-### 6. T7, why it does not grasp -- the diagnosis, in the order it was established
-Every variant scores **grasp 1/20** on the fixed 20-seed protocol. What changed across the
-session is not the score but the understanding, and each step was a measurement, not a guess.
-
-| model | epochs | one-step prediction vs its trivial baseline | grasp |
-|---|---|---|---|
-| absolute, 6k steps | 0.92 | **2.10x WORSE** | 1/20 |
-| delta, 3k steps | 0.46 | 1.20x worse | 0/20 |
-| delta, 20k steps (6 GPU h) | 3.0 | **1.68x BETTER** | 1/20 |
-| overfit: 40 episodes, 3k steps | 11.7 | **3.8x BETTER** | -- |
-
-1. **Training loss cannot see this failure.** The absolute run reached loss 0.115 and could not
-   grasp. `scripts/vla_replay_check.py` was written to measure what loss cannot: the policy's
-   error on its OWN training frames, through the SERVING path, in radians, against two
-   references -- the spread of the recorded actions, and the trivial predictor (hold the current
-   joint position / command no motion).
-2. **Conditioning was wrong.** Absolute joint targets mean the per-step motion (~0.026 rad) is
-   only 4-8% of the action spread the normaliser divides by (0.28-0.68 rad). The absolute policy
-   predicted training actions to +-0.054 rad -- TWICE the motion it had to produce, and worse
-   than doing nothing. `to_lerobot.py --delta` records `q_cmd - q_state` instead (gripper stays
-   absolute); measured, that rescales the target by **7-17x per joint** and the policy went to
-   1.68x BETTER than its baseline. The serving convention is reported on `/health` so client and
-   dataset cannot silently disagree.
-3. **Capacity and pipeline are NOT the problem.** The overfit test -- 40 pick episodes seen 11.7
-   times -- predicts 3.8x better than baseline on every joint. The architecture, the data
-   pipeline, the delta representation and the serving path all work.
-4. **What is left is COVARIATE SHIFT.** One-step prediction improved 3.5x while closed-loop
-   success did not move at all. The two measure different things: prediction is scored on
-   training-distribution frames, the eval is scored on 14 s of closed loop in held-out scenes.
-   Every demonstration came from a SCRIPTED controller, so the data is nearly noise-free and
-   covers a narrow tube of state space with **no recovery states in it** -- the demonstrator
-   never made a mistake. The policy can reproduce that tube (step 3) and cannot return to it
-   once outside.
-   Testing this means re-collecting with noise injected into the demonstrator, which is a data
-   change, not a training change. That is the next experiment, and it is NOT more GPU hours.
-
-Also open, from the same numbers: j1 and j5 are the only joints that never beat the baseline,
-in BOTH delta runs independently -- worth understanding before the next collection.
-
----
-
 
 ## What exists
 
