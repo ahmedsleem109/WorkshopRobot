@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bringwrench"
+version = "0.7.0"
+description = "Language-commanded mobile manipulation in MuJoCo on one 6 GB consumer GPU"
+readme = "README.md"
+requires-python = ">=3.11"
+# Dependencies are NOT listed here on purpose. This project runs in three environments that cannot
+# be merged -- MJX/JAX in WSL, torch+lerobot in WSL, and rendering in a WINDOWS venv because EGL
+# does not work inside WSL -- so a single dependency set would be a fiction. See requirements/.
+dependencies = []
+
+[project.optional-dependencies]
+render = ["mujoco==3.11.0", "numpy", "imageio", "imageio-ffmpeg", "pillow"]
+
+[tool.setuptools.packages.find]
+include = ["bw*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

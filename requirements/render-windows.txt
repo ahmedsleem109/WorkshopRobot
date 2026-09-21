@@ -1,0 +1,8 @@
+# Layer 0 -- the CPU simulator and ALL rendering. Windows, not WSL: MuJoCo's EGL/OpenGL path does
+# not work inside WSL2, which is why this environment exists separately at all.
+#   py -m venv render_venv && render_venv\Scripts\pip install -r requirements/render-windows.txt
+mujoco==3.11.0
+numpy==2.4.6
+imageio==2.37.4
+imageio-ffmpeg==0.6.0
+pillow==12.3.0

@@ -8,3 +8,10 @@ runs/
 
 # job-queue runtime state (the runner recreates these dirs)
 ops/queue/
+
+# a 34 MB raw clip the montage already contains 21 s of; regenerate with
+# ops/render_obstacle_clip.cmd
+media/recover_obstacle.mp4
+
+# MuJoCo writes these next to whatever ran
+MUJOCO_LOG.TXT
