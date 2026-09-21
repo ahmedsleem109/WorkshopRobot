@@ -35,7 +35,8 @@ import numpy as np
 from bw.manip.scripted_grasp import SCAN_Q
 from bw.manip.scripted_place import in_handoff_tray
 from bw.orchestrator import DESC, Orchestrator
-from bw.sim.workshop import GRASP_TOOLS, RACK_STATION, TABLES, TOOL_NAMES, in_place_zone
+from bw.sim.workshop import (GRASP_TOOLS, PLACE_ZONE, RACK_STATION, TABLES, TOOL_NAMES,
+                             in_place_zone, place_zone_z)
 from bw.sim.workshop_sim import GRIPPER_OPEN, WorkshopSim
 
 WORDS = {"wrench_10mm": "10mm wrench", "wrench_13mm": "13mm wrench", "pliers": "pliers",
@@ -144,6 +145,16 @@ def trial(sim, orch, suite, seed):
                if (in_handoff_tray(sim.gt_tool_pos(n)) if dest == "human"
                    else in_place_zone(sim.gt_tool_pos(n), dest)) and sim.held_tool() != n]
     delivered = tool if tool in in_dest else (in_dest[0] if in_dest else None)
+    # Where the tool actually ended up, always recorded: without it a failed trial says only
+    # "not delivered", and the place distribution's tail (1 transfer in 10) cannot be told from
+    # a fall or a drop without re-running it by hand.
+    tp = sim.gt_tool_pos(tool)
+    gt = {"tool_pos": [round(float(x), 3) for x in tp], "held": sim.held_tool(),
+          "base": [round(float(x), 3) for x in sim.d.qpos[0:2]]}
+    if dest != "human":
+        cx, cy = PLACE_ZONE[dest]
+        gt["zone_d"] = [round(float(tp[0] - cx), 3), round(float(tp[1] - cy), 3)]
+        gt["dz"] = round(float(tp[2] - place_zone_z()), 3)
     if suite == "retarget":
         # the SECOND tool must be delivered, and the first must not be in the tray
         ok = delivered == tool and first not in in_dest and bool(r.retargets)
@@ -152,7 +163,7 @@ def trial(sim, orch, suite, seed):
         return {"suite": suite, "seed": seed, "tool": tool, "first": first, "command": cmd,
                 "success": bool(ok), "cause": cause, "orch_reason": r.reason,
                 "delivered": delivered, "asked": r.asked, "retargets": r.retargets,
-                "sim_s": round(sim.time, 1), "wall_s": round(wall, 1),
+                "sim_s": round(sim.time, 1), "wall_s": round(wall, 1), "gt": gt,
                 "timings": {k: round(v, 1) for k, v in r.timings.items()}}
     if suite == "missing":
         ok = delivered is None and r.reason.startswith("missing")
@@ -164,7 +175,7 @@ def trial(sim, orch, suite, seed):
         cause = "ok" if ok else ("wrong_object" if delivered not in (None, tool) else r.reason)
     return {"suite": suite, "seed": seed, "tool": tool, "command": cmd, "success": bool(ok),
             "cause": cause, "orch_reason": r.reason, "delivered": delivered, "asked": r.asked,
-            "sim_s": round(sim.time, 1), "wall_s": round(wall, 1),
+            "sim_s": round(sim.time, 1), "wall_s": round(wall, 1), "gt": gt,
             "timings": {k: round(v, 1) for k, v in r.timings.items()}}
 
 
@@ -193,7 +204,15 @@ def main():
             rows.append(row)
             print(json.dumps(row), flush=True)
             if args.out:
-                Path(args.out).write_text(json.dumps(rows, indent=0))
+                # mkdir first: a run into a fresh output directory used to complete every trial and then
+        # throw FileNotFoundError writing the results away (job 325, session 7 -- 20 trials lost).
+        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.out).write_text(json.dumps(rows, indent=0))
+    if args.grounding == "vlm":
+        # Never leave the card held: twice this session a model process outlived its job and the
+        # queue runner -- which waits for a free GPU by design -- stalled behind it.
+        from bw.perception import vlm
+        print("vlm server stopped:", vlm.stop_server())
     print("\nsuite        success   failure causes")
     for s in suites:
         rs = [r for r in rows if r["suite"] == s]
