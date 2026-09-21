@@ -19,6 +19,7 @@ its median is returned. No point from any view -> None (drives the floor-sweep r
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -30,6 +31,7 @@ FG_PCT = 20                          # foreground percentile of the window's dep
 NEAR_CLIP = 0.16                     # m: nearer is the gripper (median 0.105 m in the view). Was 0.25, which
                                      # also rejected tools at the rack ends: 0.22 m from the lens (session 5)
 MERGE_TOL = 0.05                     # m: views agreeing within this form one cluster
+AGREE = 2                            # views behind the winning cluster that make a point "supported"
 SNAP_R = 14                          # px: search radius for the nearest foreground pixel
 BG_R = 40                            # px: window that estimates the local background depth
 FG_MARGIN = 0.03                     # m: this much nearer than the background = an object
@@ -152,8 +154,24 @@ def world_to_base(p_world: np.ndarray, base_pos: np.ndarray, base_quat: np.ndarr
 
 
 def locate_in_views(views: list[View], description: str, point_fn, base_pos, base_quat,
-                    tol: float = MERGE_TOL, **kw) -> Located | None:
-    """The whole pipeline on already-captured views (used by locate() and the benchmark)."""
+                    tol: float = MERGE_TOL, verify_fn=None, agree: int = AGREE, **kw) -> Located | None:
+    """The whole pipeline on already-captured views (used by locate() and the benchmark).
+
+    `verify_fn(rgb, description, uv) -> bool` is the ABSENT-TOOL tier (T8, session 7). It is called
+    ONLY when the winning cluster has fewer than `agree` views behind it, and a view whose point it
+    rejects is dropped before the merge is redone. The split matters: measured on 40 stored seeds,
+    a point corroborated by a second view is a false positive 2 times in 20 against 14 in 20 for an
+    uncorroborated one, so a blanket rule spends its recall on answers that were already right.
+
+    Measured, 40 seeds / 180 present / 20 absent (scripts/score_absent.py):
+        no verify                       FP 14/20 (70%)  miss   4/180  success 135/180 (75%)
+        blanket "2 of 3 views agree"    FP  2/20 (10%)  miss  71/180  success 100/180 (56%)
+        tier + "name the tool" on crop  FP  4/20 (20%)  miss  37/180  success 122/180 (68%)
+        tier + "is there a X" (full)    FP 11/20 (55%)  miss   6/180  success 137/180 (76%)
+    The name tier is the one that makes a REFUSAL trustworthy, which is what the missing-tool
+    recovery needs; it costs 13 of 180 successes and ~79 extra model calls per 200 queries. A
+    refusal costs a recovery (floor sweep, ask the human), a false positive costs a confident grasp
+    at nothing -- which is why the trade is taken where the answer is thin and nowhere else."""
     per_view, pts, cost = [], [], []
     for vw in views:
         uv = point_fn(vw.rgb, description)
@@ -166,6 +184,16 @@ def locate_in_views(views: list[View], description: str, point_fn, base_pos, bas
     med, mem = merge(pts, tol, cost)
     if med is None:
         return None
+    if verify_fn is not None and len(mem) < agree:
+        kept = [i for i, p in enumerate(pts) if p is None
+                or verify_fn(views[i].rgb, description, per_view[i]["uv"])]
+        for i, p in enumerate(pts):
+            if i not in kept:
+                pts[i] = None
+                per_view[i]["verify"] = False
+        med, mem = merge(pts, tol, cost)
+        if med is None:
+            return None
     return Located(world=med, base=world_to_base(med, base_pos, base_quat), n_views=len(mem),
                    n_pointed=sum(p is not None for p in pts), per_view=per_view)
 
@@ -191,10 +219,32 @@ def capture_views(sim, pans=SCAN_PANS, size=IMG, move_s: float = 0.8, extra=None
     return views
 
 
-def locate(sim, description: str, point_fn=None, pans=SCAN_PANS) -> Located | None:
-    """Scan, point, back-project, merge. `point_fn` defaults to vlm.point (the model process)."""
+def name_verifier(point_fn=None):
+    """The tier that made a refusal trustworthy: ask the model to NAME what is at the point, on the
+    zoomed crop, and keep the point only if the name is the queried tool. Open question rather than
+    yes/no, because the model answers "yes" agreeably (crop verify: FP 12/20 vs 4/20 for this)."""
+    from bw.perception import vlm
+    import numpy as _np
+
+    def verify(rgb, description, uv):
+        if rgb is None or uv is None:
+            return True                      # nothing to look at: do not invent a rejection
+        crop, _ = vlm._crop(_np.asarray(rgb), uv)
+        raw = vlm._post_ask(crop, vlm.NAME_Q)["raw"].strip().lower()
+        want = vlm.resolve_query(description).lower()
+        head = [w for w in re.split(r"[^a-z]+", want) if len(w) > 3]
+        return any(w in raw for w in head) if head else True
+    return verify
+
+
+def locate(sim, description: str, point_fn=None, pans=SCAN_PANS, verify: bool = False
+           ) -> Located | None:
+    """Scan, point, back-project, merge. `point_fn` defaults to vlm.point (the model process).
+    `verify=True` adds the absent-tool tier (see locate_in_views): fewer false positives on a tool
+    that is not there, at the cost of some recall."""
     if point_fn is None:
         from bw.perception.vlm import point as point_fn
     views = capture_views(sim, pans)
     return locate_in_views(views, description, point_fn, sim.d.qpos[0:3].copy(),
-                           sim.d.qpos[3:7].copy())
+                           sim.d.qpos[3:7].copy(),
+                           verify_fn=name_verifier() if verify else None)
