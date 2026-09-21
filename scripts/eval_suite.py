@@ -151,6 +151,17 @@ def trial(sim, orch, suite, seed):
     tp = sim.gt_tool_pos(tool)
     gt = {"tool_pos": [round(float(x), 3) for x in tp], "held": sim.held_tool(),
           "base": [round(float(x), 3) for x in sim.d.qpos[0:2]]}
+    # Did it FALL, or did it simply fail to arrive? `nav_dest_failed` is written by two different
+    # branches of the state machine -- one guarded by `not loco.is_stable()` (a fall), one for a
+    # walk that ends stable but short -- and both store the same string, so the cause field cannot
+    # tell them apart. That ambiguity is load-bearing: STATUS has claimed since session 3 that
+    # "8 of the 10 end-to-end failures are the base falling on the 12 cm step", and the evidence
+    # for it was this label. navigate_to already computes `fell` per leg and logs it into res.log;
+    # it just never reached the row. Record it, and the stability of the base at the end.
+    gt["stable"] = bool(sim.loco.is_stable())
+    gt["nav"] = [{"to": e.get("to"), "ok": e.get("ok"), "fell": e.get("fell"),
+                  "err_mm": e.get("err_mm")} for e in r.log if e.get("state") == "NAV"]
+    gt["fell_any"] = any(e.get("fell") for e in gt["nav"])
     if dest != "human":
         cx, cy = PLACE_ZONE[dest]
         gt["zone_d"] = [round(float(tp[0] - cx), 3), round(float(tp[1] - cy), 3)]
@@ -204,10 +215,11 @@ def main():
             rows.append(row)
             print(json.dumps(row), flush=True)
             if args.out:
-                # mkdir first: a run into a fresh output directory used to complete every trial and then
-        # throw FileNotFoundError writing the results away (job 325, session 7 -- 20 trials lost).
-        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
-        Path(args.out).write_text(json.dumps(rows, indent=0))
+                # mkdir first: a run into a fresh output directory used to complete every trial and
+                # then throw FileNotFoundError writing the results away (job 325, session 7 -- 20
+                # trials lost).
+                Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+                Path(args.out).write_text(json.dumps(rows, indent=0))
     if args.grounding == "vlm":
         # Never leave the card held: twice this session a model process outlived its job and the
         # queue runner -- which waits for a free GPU by design -- stalled behind it.
