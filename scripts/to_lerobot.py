@@ -38,12 +38,30 @@ def decode(path: Path) -> list[np.ndarray]:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--raw", default="/mnt/d/bw_data/raw")
+    # Comma-separated so several raw collections can be converted into ONE dataset. Session 7
+    # trains on clean + noise-injected episodes together: the noisy half supplies the recovery
+    # states the scripted demonstrator never produced, the clean half keeps the bulk of the action
+    # distribution where it was (MEAN_STD normalisation divides by the std, and kick-sized deltas
+    # inflate it -- measured, |delta|median/std for j1 falls 22.6% -> 9.8% on noise alone and
+    # 11.8% on the union; j5 43.1% -> 8.3% -> 10.8%).
+    ap.add_argument("--raw", default="/mnt/d/bw_data/raw",
+                    help="raw episode directory, or several separated by commas")
     ap.add_argument("--root", default=str(Path.home() / "bringwrench/data/bw_demos"))
     ap.add_argument("--repo-id", default="local/bw_demos")
     ap.add_argument("--kind", default=None, help="only pick or only place episodes")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--shard", default=None, help="i/N: convert every N-th episode from i")
+    ap.add_argument("--fine-phase", action="store_true",
+                    help="keep only the fine approach/grasp, dropping the leading transport swing "
+                         "(see the comment in the episode loop for the measurement)")
+    ap.add_argument("--transport-mrad", type=float, default=15.0,
+                    help="a tick whose largest joint delta exceeds this is transport, not fine")
+    ap.add_argument("--fine-fallback", type=float, default=0.4,
+                    help="fraction to drop when no tick exceeds --transport-mrad")
+    ap.add_argument("--quiet-window", type=int, default=5,
+                    help="ticks that must all be below --transport-mrad for the swing to be over")
+    ap.add_argument("--min-fine", type=int, default=25,
+                    help="minimum fine ticks for an episode to be kept (2.5 s at 10 Hz)")
     ap.add_argument("--merge", type=int, default=None,
                     help="merge <root>_s0..s{N-1} (from --shard runs) into <root>")
     ap.add_argument("--delta", action="store_true",
@@ -54,7 +72,9 @@ def main():
         return merge(args)
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
-    eps = sorted(p for p in Path(args.raw).iterdir() if p.is_dir() and (p / "meta.json").exists())
+    eps = [q for d in args.raw.split(",")
+           for q in sorted(p for p in Path(d).iterdir()
+                           if p.is_dir() and (p / "meta.json").exists())]
     if args.kind:
         eps = [p for p in eps if p.name.endswith("_" + args.kind)]
     if args.limit:
@@ -93,7 +113,39 @@ def main():
             print(f"skip {p.name}: {len(arr['action'])} actions, "
                   f"{ {c: len(v) for c, v in frames.items()} } frames", flush=True)
             continue
-        for t in range(n):
+        # FINE PHASE ONLY (session 7). The demonstration contains two motions whose amplitudes
+        # differ by an order of magnitude, and a single regression objective under a single
+        # MEAN_STD normaliser cannot serve both. Measured over 60 pick episodes:
+        #   share of each joint's squared motion in the first 40% of the episode (the transport
+        #   swing from the scan pose to the pre-grasp):  j1 91%  j2 66%  j3 60%  j4 80%  j6 100%
+        #   |j1 delta| per tick: 27-28 mrad during that swing, 3-5 mrad during the fine approach
+        # The trained policy's error on j1 is 29 mrad -- it fitted the swing and is noise at the
+        # scale that decides the grasp, which is why it predicts 1.68x better than the trivial
+        # baseline and still grasps 0/20, on TRAINING scenes as much as held-out ones
+        # (scripts/vla_exec_check.py, scripts/vla_replay_check.py).
+        # Transport is what IK and the scripted skill already do perfectly; the VLA's job is the
+        # last stretch. --fine-phase drops the leading transport ticks, so the normaliser's scale
+        # becomes the fine motion's own scale.
+        t0 = 0
+        if args.fine_phase:
+            dj = np.abs(np.asarray(arr["action"], np.float32)[:n, :6]
+                        - np.asarray(arr["state"], np.float32)[:n, :6])
+            # The cut is the END OF THE LEADING SWING, not the last big tick anywhere: the LIFT
+            # is also a large motion and the VLA must learn it, so "last tick over the threshold"
+            # would keep only the clamp. Walk forward to the first tick from which the motion stays
+            # small for a whole window -- that is where transport hands over to the fine approach.
+            m = dj.max(1)
+            w = args.quiet_window
+            t0 = int(args.fine_fallback * n)
+            for t in range(len(m) - w):
+                if m[t:t + w].max() <= args.transport_mrad / 1000.0:
+                    t0 = t
+                    break
+            t0 = max(0, min(t0, n - args.min_fine))
+            if n - t0 < args.min_fine:
+                print(f"skip {p.name}: only {n - t0} fine ticks", flush=True)
+                continue
+        for t in range(t0, n):
             act = np.asarray(arr["action"][t], np.float32).copy()
             if args.delta:
                 # DELTA ARM ACTION (2026-09-20). Absolute joint targets make this task nearly

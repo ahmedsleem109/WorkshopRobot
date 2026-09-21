@@ -30,6 +30,7 @@ sys.path.insert(0, str(ROOT))
 import numpy as np
 
 from bw.locomotion.navigate import walk_to
+from bw.manip.ik import ArmIK
 from bw.manip.scripted_grasp import SCAN_Q
 from bw.policy import vla
 from bw.sim.workshop import GRASP_TOOLS, PLACE_STATION, RACK_STATION, TOOL_NAMES
@@ -38,6 +39,17 @@ from bw.task.language import instruction
 from bw.task.spec import Snapshot, Task, evaluate
 
 PICK_S, PLACE_S = 14.0, 12.0     # demos are ~9-12 s (pick) and ~8-10 s (place) at 10 Hz
+
+
+def train_scene(sim, seed):
+    """Rebuild a scene a DEMONSTRATION was collected in (scripts/collect_demos.py's rng stream), so
+    the policy can be scored on states it was actually trained on. Distinguishing "cannot grasp
+    anywhere" from "cannot grasp in a NEW scene" is what separates an execution problem from
+    covariate shift, and the held-out protocol cannot tell them apart on its own.
+    Returns (tool, rng, start) -- the tool is the one the demonstration used, not seed % 5."""
+    from scripts.vla_exec_check import collect_scene
+    tool, start = collect_scene(sim, seed)
+    return tool, np.random.default_rng(31_000 + seed), start
 
 
 def scene(sim, seed, tool):
@@ -58,9 +70,16 @@ def lifted_tool(sim, start):
     return None
 
 
-def pick(sim, tool, rng, start):
+def pick(sim, tool, rng, start, from_pregrasp: bool = False, ik=None, max_s: float = None):
     text = instruction(Task("pick", tool), rng)
-    vla.run_skill(sim, text, PICK_S)
+    if from_pregrasp:
+        # Score the policy on the stretch it is trained for: the scripted stack transports to the
+        # pre-grasp pose (in the full pipeline that target comes from locate(), median 10.7 mm) and
+        # the policy does the approach, the close and the lift. See scripted_grasp.to_pregrasp.
+        from bw.manip.scripted_grasp import to_pregrasp
+        if to_pregrasp(sim, ik, tool, rng) is None:
+            return text, {"success": False, "reason": "pregrasp_ik_fail"}, None
+    vla.run_skill(sim, text, max_s or PICK_S)
     sim.settle(1.0)
     ev = evaluate(sim, Task("pick", tool), start)
     return text, ev, lifted_tool(sim, start)
@@ -68,6 +87,15 @@ def pick(sim, tool, rng, start):
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--from-pregrasp", action="store_true",
+                    help="scripted transport to the pre-grasp pose, then hand over to the policy "
+                         "(matches to_lerobot.py --fine-phase)")
+    ap.add_argument("--pick-s", type=float, default=None,
+                    help="seconds of policy control for the pick (default 14; use ~7 with "
+                         "--from-pregrasp, since transport is no longer the policy's job)")
+    ap.add_argument("--train-scenes", action="store_true",
+                    help="score on the scenes the demonstrations were collected in (T7 Tier 1), "
+                         "instead of held-out seeds")
     ap.add_argument("n", type=int)
     ap.add_argument("--start", type=int, default=0)
     ap.add_argument("--transfer", action="store_true")
@@ -77,12 +105,16 @@ def main():
     assert vla.health(), "start bw/policy/vla_server.py first"
     sim = WorkshopSim()
     sim.attach_locomotion()
+    ik = ArmIK(sim.m) if args.from_pregrasp else None
     rows = []
     t0 = time.time()
     for seed in range(args.start, args.start + args.n):
-        tool = GRASP_TOOLS[seed % len(GRASP_TOOLS)]
-        rng, start = scene(sim, seed, tool)
-        text, ev, got = pick(sim, tool, rng, start)
+        if args.train_scenes:
+            tool, rng, start = train_scene(sim, seed)
+        else:
+            tool = GRASP_TOOLS[seed % len(GRASP_TOOLS)]
+            rng, start = scene(sim, seed, tool)
+        text, ev, got = pick(sim, tool, rng, start, args.from_pregrasp, ik, args.pick_s)
         row = {"seed": seed, "tool": tool, "instruction": text, "grasp": ev["success"],
                "grasp_reason": ev["reason"], "lifted": got}
         if args.transfer and ev["success"]:
