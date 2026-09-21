@@ -176,9 +176,9 @@ python scripts/eval_suite.py --suite nominal --n 10 # one end-to-end scenario
 python scripts/make_orch_video.py 3 out.mp4 --suite nominal    # render a run
 ```
 
-Read **`docs/ARCHITECTURE.md`** first (four layers, one contract each), then **`STATUS.md`** for
-the current numbers, the traps, and everything that was tried and rejected with the measurement
-that killed it.
+New here? Read **[`HANDOFF.md`](HANDOFF.md)** — the full account of what was built, what failed
+and why, and what to do next. Then **`docs/ARCHITECTURE.md`** (four layers, one contract each) and
+**`STATUS.md`** for the live numbers and the traps.
 
 ---
 
