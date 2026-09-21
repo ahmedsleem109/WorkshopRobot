@@ -17,6 +17,7 @@ set OUT=%~3
 set ACTSTEPS=%~4
 set DELTA=%~5
 set RUN=%~6
+set EXTRA=%~7
 if "%RUN%"=="" set RUN=vla_full
 if "%CKPT%"=="" set CKPT=last
 if "%N%"=="" set N=20
@@ -38,7 +39,7 @@ goto wait
 
 :ready
 echo [3/3] evaluating %N% held-out seeds -^> %OUT%
-"%RENDER_PY%" scripts\eval_vla.py %N% --transfer --swap --out "%OUT%"
+"%RENDER_PY%" scripts\eval_vla.py %N% --transfer --swap --out "%OUT%" %EXTRA%
 
 :cleanup
 REM Stop the server and VERIFY it is gone. A single unchecked pkill is not enough: when it
