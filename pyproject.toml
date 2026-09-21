@@ -7,6 +7,8 @@ name = "bringwrench"
 version = "0.7.0"
 description = "Language-commanded mobile manipulation in MuJoCo on one 6 GB consumer GPU"
 readme = "README.md"
+license = "MIT"
+authors = [{name = "Ahmed Sleem"}]
 requires-python = ">=3.11"
 # Dependencies are NOT listed here on purpose. This project runs in three environments that cannot
 # be merged -- MJX/JAX in WSL, torch+lerobot in WSL, and rendering in a WINDOWS venv because EGL

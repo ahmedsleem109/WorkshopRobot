@@ -19,6 +19,25 @@ it to the person — and says something useful when it cannot.
         +--> ask_human     when the command is ambiguous or the tool is gone
 ```
 
+## Quickstart
+
+```bash
+pip install -e .                                    # makes `bw` importable; no deps are declared
+                                                    # on purpose -- see requirements/ below
+# three environments, because they cannot be one (docs/ARCHITECTURE.md explains why)
+#   requirements/render-windows.txt   CPU sim + ALL rendering   (Windows: EGL fails inside WSL)
+#   requirements/mjx-wsl.txt          MJX/brax locomotion training + the Phase 1 gate
+#   requirements/vla-wsl.txt          SmolVLA fine-tune + policy server
+
+python -m bw.sim.build_models                       # regenerate the four model XMLs
+python scripts/try_grasp.py 25 --walk               # the grasp benchmark: expect 125/125
+python scripts/eval_suite.py --suite nominal --n 10 # one end-to-end scenario, scripted skills
+```
+
+New here? Read **`docs/ARCHITECTURE.md`** first (four layers, one contract each, and the six
+conventions that are easy to break), then **`STATUS.md`** for the current numbers and the traps.
+`REMAINING.md` is the dependency-ordered task list; `docs/blog.md` is the story of the bugs.
+
 ## Results (all measured in this repo, seeds and scripts given)
 
 | what | number | how |
