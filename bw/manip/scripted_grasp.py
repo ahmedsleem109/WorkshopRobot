@@ -179,6 +179,37 @@ def cartesian(sim, ik, q_start, p0, p1, Rg, grip, duration, record, rate_hz=10.0
     return q
 
 
+def to_pregrasp(sim: WorkshopSim, ik: ArmIK, name: str, rng: np.random.Generator,
+                record=None) -> dict | None:
+    """Transport only: open the jaws, swing to the staging pose, arrive at the PRE-GRASP pose.
+    Returns `plan_grasp`'s plan, or None if the IK failed.
+
+    This exists so a LEARNED policy can be scored on the part of the task it is actually being
+    trained for (session 7). Measured over 60 pick episodes, 91% of joint 1's squared motion and
+    100% of joint 6's is in the leading transport swing (27-28 mrad per tick against 3-5 mrad during
+    the fine approach), and the trained policy's error on j1 -- 29 mrad -- is the size of the swing
+    rather than of the approach. Transport is an IK problem the scripted stack solves exactly, and
+    in the full pipeline its target comes from `locate()` (median 10.7 mm), so handing the VLA the
+    approach and the grasp is the division of labour the architecture already assumes.
+
+    It deliberately repeats the opening phases of `run_grasp` instead of refactoring them out:
+    run_grasp is the 125/125 demonstrator and is not worth disturbing for an experiment."""
+    sim.lock_stance()
+    plan = plan_grasp(sim, ik, name, rng)
+    if plan is None:
+        return None
+    op = min(GRIPPER_OPEN, GRASP_HALF_WIDTH[name] + 0.012 + rng.uniform(0.0, 0.006))
+
+    def arm7(q6, grip):
+        return np.concatenate([q6, [grip]])
+
+    sim.move_arm(arm7(sim.arm_q()[:6], op), rng.uniform(0.3, 0.5), record)
+    if plan["q_stage"] is not None:
+        sim.move_arm(arm7(plan["q_stage"], op), rng.uniform(1.4, 1.9), record)
+    sim.move_arm(arm7(plan["q_pre"], op), rng.uniform(1.0, 1.4), record)
+    return plan
+
+
 def run_grasp(sim: WorkshopSim, ik: ArmIK, name: str, rng: np.random.Generator,
               record=None, on_phase=None) -> dict:
     """Execute a full grasp of `name`. `record(action7)` is called at 10 Hz.
