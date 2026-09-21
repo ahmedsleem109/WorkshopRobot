@@ -246,13 +246,21 @@ class Orchestrator:
         return point
 
     def locate(self, tool: str, res: Result):
-        from bw.perception.locate import capture_views, locate_in_views
+        from bw.perception.locate import capture_views, locate_in_views, name_verifier
         from bw.perception.vlm import point as vlm_point
         sim = self.sim
         t0 = time.time()
         views = capture_views(sim)
         fn = self._oracle_point(tool, views) if self.grounding == "oracle" else vlm_point
-        loc = locate_in_views(views, DESC[tool], fn, sim.d.qpos[0:3].copy(), sim.d.qpos[3:7].copy())
+        # The absent-tool tier, on VLM grounding only: an UNCORROBORATED point is put to a
+        # name-the-tool question before it is believed. It is what makes "the tool is missing"
+        # trustworthy -- false positives on an absent tool 14/20 -> 4/20, measured on 40 stored
+        # seeds (scripts/score_absent.py) -- and it costs 13 of 180 locate successes. The oracle
+        # needs none of it. The state machine's missing-tool branch reads a refusal, so this is
+        # exactly where the trade belongs.
+        vfn = None if self.grounding == "oracle" else name_verifier()
+        loc = locate_in_views(views, DESC[tool], fn, sim.d.qpos[0:3].copy(), sim.d.qpos[3:7].copy(),
+                              verify_fn=vfn)
         res.timings["locate"] = res.timings.get("locate", 0.0) + time.time() - t0
         self._log(res, "LOCATE", tool=tool, found=loc is not None,
                   world=None if loc is None else np.round(loc.world, 3).tolist())

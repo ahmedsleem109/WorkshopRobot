@@ -108,9 +108,34 @@ def ensure_server(quant: str = "bf16", wait_s: float = 180.0) -> dict:
     raise TimeoutError(f"vlm_server not healthy after {wait_s}s")
 
 
+def stop_server(timeout: float = 15.0) -> bool:
+    """Stop the model process and CONFIRM the port has gone quiet. A script that starts the server
+    must call this: job 310 (session 7) left it holding 4.85 GB after it finished, and the queue
+    runner -- which waits for a free card by design -- stalled behind it until the process was
+    killed by hand. Same failure the VLA server had, and the same fix."""
+    global _proc
+    if sys.platform == "win32":
+        subprocess.run(["wsl.exe", "-e", "bash", "-lc", "pkill -f 'vlm_server[.]py'"],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        subprocess.run(["bash", "-lc", "pkill -f 'vlm_server[.]py'"],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        if health() is None:
+            _proc = None
+            return True
+        time.sleep(1.0)
+    return False
+
+
 CROP = 160          # px (of a 512 image): refinement window around the first answer
 ZOOM = 3            # nearest-neighbour upscale of the crop before re-asking
 VERIFY_Q = "Is there a {obj} in this image? Answer yes or no."
+# The ABSENT-tool tier (T8, session 7) asks an OPEN question instead: the model answers a yes/no
+# agreeably (crop verify left 12 of 20 false positives standing, naming left 4), so the rejection
+# rule reads a name and compares it to what was asked for. See bw/perception/locate.name_verifier.
+NAME_Q = "Name the single tool at the centre of this image. Answer with its name only."
 
 
 def _post_point(img: np.ndarray, obj: str) -> dict:
