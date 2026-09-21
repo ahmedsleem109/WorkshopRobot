@@ -21,6 +21,8 @@ its collision geometry is put PLACE_CLEAR above the table top.
 
 from __future__ import annotations
 
+import os
+
 import mujoco
 import numpy as np
 
@@ -57,7 +59,9 @@ PLACE_JITTER = 0.020            # m: aim scatter inside the zone; swept, see pla
 # and the tool's lean at release predicted it (cos = +1.00 on the 13 mm wrench). Aimed at
 # the centre, a 95 mm topple leaves 5 mm of a 100 mm half-zone: that was 24 of the 53
 # transfer failures. Shifting the aim by about half the topple centres BOTH outcomes.
-PLACE_AIM_SHIFT = 0.045         # m, along the approach axis, away from the robot
+# m, along the approach axis, away from the robot. Overridable from the environment so the
+# aim-shift sweep (scripts/topple_diagnose.py, session 7) can A/B it without editing the skill.
+PLACE_AIM_SHIFT = float(os.environ.get("BW_PLACE_AIM_SHIFT", "0.045"))
 # Tools placed STANDING UPRIGHT, the way they stood in the rack (handle down), instead of hung
 # straight down from the jaws. The screwdriver stands handle-down and is gripped on the handle,
 # so "hang it down" flipped it 180 deg and stood it on its SHAFT TIP: it toppled every time,
@@ -71,6 +75,16 @@ PLACE_RETRACT = 0.12            # m: up, AFTER backing off (see run_place)
 PLACE_BACKOFF = 0.11            # m: straight back along the approach, first thing after
                                 # opening -- a finger sits inside the tape roll's hole
 HOLD_VERIFY = 2.0               # the placed tool must stay put this long (matches the grasp)
+# Tail guard (session 7). MEASURED, scripts/topple_diagnose.py, 14 pliers transfers onto table A:
+# the tool's position AT RELEASE scattered +-70 mm in the zone frame against a 100 mm half-width,
+# while the post-release displacement was a median 0 mm. So the 1-transfer-in-10 that lands
+# outside the zone is a RELEASE-POSITION failure, not a topple. The cause is `_servo_xy` giving up
+# silently -- it returns as soon as one pass's IK does not converge (`ok` false or residual >
+# 1 cm) -- on top of an aim point that already carries PLACE_JITTER plus PLACE_AIM_SHIFT. Nothing
+# checked the achieved offset before opening the jaws. Now it is checked against the ZONE CENTRE,
+# which is the one number the success spec tests, and a tool beyond this re-servos at the
+# jitter-free aim with more passes and a tighter tolerance.
+PLACE_MAX_OFFSET = 0.050        # m from the zone centre, at release
 
 
 def _rot_about(axis: np.ndarray, angle: float) -> np.ndarray:
@@ -185,9 +199,13 @@ def plan_place(sim: WorkshopSim, ik: ArmIK, name: str, table: str, rng):
     # ... and aim PLACE_AIM_SHIFT PAST the centre, away from the robot: the topple has a
     # direction (see PLACE_AIM_SHIFT).
     h0 = np.arctan2(zy - sh[1], zx - sh[0])
-    shift = 0.0 if name in STAND_UPRIGHT else PLACE_AIM_SHIFT      # standing on its handle: no topple aim
-    tx = zx + shift * np.cos(h0) + rng.uniform(-PLACE_JITTER, PLACE_JITTER)
-    ty = zy + shift * np.sin(h0) + rng.uniform(-PLACE_JITTER, PLACE_JITTER)
+    # No aim shift for a tool that cannot topple: one standing on its handle, and the tape roll
+    # (a ring has no long axis to fall along). MEASURED again in session 7 -- the shift was costing
+    # more than the topple it pays for; see the vertical-hang branch in run_place.
+    shift = 0.0 if name in STAND_UPRIGHT or name == "tape_roll" else PLACE_AIM_SHIFT
+    ax, ay = zx + shift * np.cos(h0), zy + shift * np.sin(h0)      # the aim WITHOUT the jitter
+    tx = ax + rng.uniform(-PLACE_JITTER, PLACE_JITTER)
+    ty = ay + rng.uniform(-PLACE_JITTER, PLACE_JITTER)
 
     heading = np.arctan2(ty - sh[1], tx - sh[0])
     a = np.array([np.cos(heading), np.sin(heading), 0.0])      # horizontal approach
@@ -211,7 +229,8 @@ def plan_place(sim: WorkshopSim, ik: ArmIK, name: str, table: str, rng):
         # the roll hangs the tool straight down, and that, not joint economy, is what decides
         # whether the release pose is inside the arm's reach.
         best = dict(R=R_place, p_release=p_release, q_release=q_rel, q_pre=q_pre,
-                    target=(tx, ty), approach=a, roll_deg=round(float(np.degrees(roll)), 1))
+                    target=(tx, ty), aim=(ax, ay), approach=a,
+                    roll_deg=round(float(np.degrees(roll)), 1))
         break
     return best
 
@@ -277,12 +296,40 @@ def run_place(sim: WorkshopSim, ik: ArmIK, name: str, table: str, rng,
     # shift pushed them further out. Nearly vertical (< ~1 deg) -> keep the prior.
     # The tape roll is excluded: a ring has no long axis to lean, and it does not topple.
     lean = _lean_xy(sim, name)
-    if name != "tape_roll" and name not in STAND_UPRIGHT and 0.015 < np.linalg.norm(lean) < 0.5:
+    # A tool that hangs VERTICAL will not topple, so PLACE_AIM_SHIFT buys nothing and spends
+    # 45 mm of the 100 mm half-zone. MEASURED (session 7, topple_diagnose 14 pliers transfers onto
+    # table A): displacement after release is a median 0 mm and cos(displacement, lean) is -0.00 --
+    # the topple the shift was introduced for does not happen any more, since the tools are now
+    # released nearly upright. The two seeds that sat 55-60 mm off centre were there because the
+    # ALIGN AIMED THEM THERE. Vertical -> aim at the zone centre, keeping only the jitter.
+    lean_n = float(np.linalg.norm(lean))
+    if name != "tape_roll" and name not in STAND_UPRIGHT and 0.015 < lean_n < 0.5:
         zx, zy = PLACE_ZONE[table]
         jit = np.array(plan["target"]) - (np.array([zx, zy]) + PLACE_AIM_SHIFT * a[:2])
         tgt = np.array([zx, zy]) - PLACE_AIM_SHIFT * lean / np.linalg.norm(lean) + jit
         plan["target"] = (float(tgt[0]), float(tgt[1]))
+        plan["aim"] = (float(tgt[0]), float(tgt[1]))
         q = _servo_xy(sim, ik, name, plan["target"], R, grip, record)
+    elif name not in STAND_UPRIGHT and lean_n <= 0.015:
+        zx, zy = PLACE_ZONE[table]
+        jit = np.array(plan["target"]) - np.array(plan["aim"])       # keep the variety, drop the shift
+        plan["aim"] = (float(zx), float(zy))
+        plan["target"] = (float(zx + jit[0]), float(zy + jit[1]))
+        q = _servo_xy(sim, ik, name, plan["target"], R, grip, record)
+
+    # --- the tail guard (PLACE_MAX_OFFSET): do not open the jaws with the tool near the line.
+    zc = np.array(PLACE_ZONE[table], float)
+    off0 = float(np.linalg.norm(sim.gt_tool_pos(name)[:2] - zc))
+    recentred = 0
+    while off0 > PLACE_MAX_OFFSET and recentred < 2:
+        recentred += 1
+        plan["target"] = plan["aim"]                  # the jitter-free aim, centre + the shift
+        q = _servo_xy(sim, ik, name, plan["target"], R, grip, record, passes=6, tol=0.003)
+        off1 = float(np.linalg.norm(sim.gt_tool_pos(name)[:2] - zc))
+        if off1 >= off0 - 0.002:                      # no longer converging: stop trying
+            off0 = off1
+            break
+        off0 = off1
     p_rel = release_pose(sim, name, plan["target"], R)
     diag_repoint = round(float(np.linalg.norm(
         sim.gt_tool_pos(name)[:2] - np.array(plan["target"]))), 4)
@@ -299,7 +346,8 @@ def run_place(sim: WorkshopSim, ik: ArmIK, name: str, table: str, rng,
                 sim.gt_tool_pos(name)[:2] - np.array(plan["target"]))), 1),
             "target": [round(v, 3) for v in plan["target"]],
             "touched": _on_table(sim, name), "align_before_mm": round(1000 * diag_repoint, 1),
-            "roll_deg": plan["roll_deg"]}
+            "roll_deg": plan["roll_deg"], "recentred": recentred,
+            "zone_off_mm": round(1000 * off0, 1)}
 
     ph("release")
     sim.move_arm(np.concatenate([q, [GRIPPER_OPEN]]), rng.uniform(0.5, 0.8), record)
