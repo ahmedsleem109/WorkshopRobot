@@ -15,3 +15,6 @@ media/recover_obstacle.mp4
 
 # MuJoCo writes these next to whatever ran
 MUJOCO_LOG.TXT
+
+# social-cut intermediates (make_social_cut.py regenerates them)
+media/_social/
