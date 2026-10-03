@@ -177,8 +177,7 @@ python scripts/make_orch_video.py 3 out.mp4 --suite nominal    # render a run
 ```
 
 New here? Read **[`HANDOFF.md`](HANDOFF.md)** — the full account of what was built, what failed
-and why, and what to do next. Then **`docs/ARCHITECTURE.md`** (four layers, one contract each) and
-**`STATUS.md`** for the live numbers and the traps.
+and why, and what to do next. Then **`docs/ARCHITECTURE.md`** (four layers, one contract each).
 
 ---
 
@@ -194,7 +193,7 @@ and why, and what to do next. Then **`docs/ARCHITECTURE.md`** (four layers, one 
   rate on absent tools became a ~70% false-negative rate on present ones.
 - `wrench_13mm` is the only tool with no nominal success, reproduced independently twice.
 - On this machine, **`exit 0` means nothing**: five separate things reported success while doing
-  nothing or the wrong thing. `STATUS.md` names all five.
+  nothing or the wrong thing. [`HANDOFF.md`](HANDOFF.md) names all five.
 
 ---
 
@@ -210,7 +209,7 @@ bw/task/            the one success spec, and the instruction paraphrases
 bw/orchestrator.py  the state machine
 scripts/            benchmarks, collectors, evaluation suites, video renderers
 ops/                run scripts (training, collection, conversion) + the job queue runner
-docs/               ARCHITECTURE.md, blog.md (the story of the bugs), STATUS_archive.md
+docs/               ARCHITECTURE.md, blog.md (the story of the bugs)
 ```
 
 ## Credits

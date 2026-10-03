@@ -1,12 +1,9 @@
-# HANDOFF — "Bring me the 10mm wrench"
+# Engineering notes — "Bring me the 10mm wrench"
 
-A complete account of the project as of **2026-09-21, end of session 8**: what exists, what was
+A complete account of the project as of **2026-09-21**: what exists, what was
 built, what failed and why, and what to do next.
 
-This document is written for someone with no prior context. `STATUS.md` is the live working
-state and is more detailed on current numbers; `docs/STATUS_archive.md` holds the session
-narratives; `REMAINING.md` is the dependency-ordered task list. **This file is the overview that
-ties them together.**
+This document is written for someone with no prior context.
 
 ---
 
@@ -116,10 +113,10 @@ per episode. SmolVLA fine-tuned on them — see §5.3, which is the most instruc
 project.
 
 ### Operations
-A **job-queue runner** (`ops/queue_runner.ps1`) that exists because an agent's background shell
-gets reaped under memory pressure — it killed the same fine-tune twice at steps 3,900 and 4,700
-of 6,000. The rule that came out of it: *the agent must never own a long job.* It enqueues by
-writing a file; a runner started once by a human executes them one at a time, waiting for a cool
+A **job-queue runner** (`ops/queue_runner.ps1`) that exists because background shells
+got killed under memory pressure — the same fine-tune died twice, at steps 3,900 and 4,700
+of 6,000. The rule that came out of it: *no interactive shell owns a long job.* Jobs are enqueued by
+writing a file; a runner started once executes them one at a time, waiting for a cool
 and free GPU.
 
 ---
@@ -301,7 +298,7 @@ Make the queue runner's exit codes trustworthy (`|| exit /b 1` per line; have th
   failures and both are that tool, reproduced independently twice.
 - Retarget is 6/10; 3 of those are the step again.
 - ~20 GB of VLA checkpoints in `runs/vla_delta`, `vla_overfit`, `vla_delta_long` should be pruned
-  to the evaluated ones. **Deliberately not done by an agent — it is a destructive call.**
+  to the evaluated ones. **Not done yet — deleting checkpoints is a deliberate, manual call.**
 
 ### P3 — presentation, which is where the return is
 The engineering is stronger than its presentation. In rough order of impact:
@@ -364,9 +361,6 @@ about it.
 * A run's `checkpoints/final` is often **not** its best policy. `scripts/pick_best_ckpt.py`
   chooses from the run's own eval rows. `payload_l5b` peaked at step 1.3M and declined for the
   next 4.6M steps.
-* The `## Known bugs` section of `STATUS.md` is **partly historical** — the screwdriver and
-  tape_roll entries describe bugs that were later fixed (grasp is now 125/125). Read it as a
-  record of investigations, not a current defect list.
 
 ---
 
@@ -382,9 +376,9 @@ bw/task/            the one success spec, and the instruction paraphrases
 bw/orchestrator.py  the state machine
 scripts/            benchmarks, collectors, evaluation suites, video renderers
 ops/                run scripts + the job queue runner
-docs/               ARCHITECTURE.md, blog.md, STATUS_archive.md, REPO_LAYOUT_PLAN.md
+docs/               ARCHITECTURE.md, blog.md, REPO_LAYOUT_PLAN.md
 media/              rendered clips and the montage
 ```
 
-Branch convention: one branch per feature, merged into a `session-N` branch. Measurements go in
+Branch convention: one branch per feature, merged into an integration branch. Measurements go in
 the commit message — the git log is part of the record, not just the code.

@@ -77,6 +77,6 @@ ops/vla_server.sh  ->  HTTP :8766 /act  ->  bw/policy/vla.py  ->  WorkshopSim
   a client and a dataset cannot silently disagree.
 * **The legs are stand-locked during manipulation.** Every demonstration was recorded that way, and a
   rollout with the legs free walks the base 25-260 mm away from the rack while the arm reaches.
-* **No agent owns a long job.** `ops/queue_runner.ps1` runs queued `.cmd` files one at a time, waits
+* **No interactive shell owns a long job.** `ops/queue_runner.ps1` runs queued `.cmd` files one at a time, waits
   for a cool and free GPU, and survives the shell that enqueued them.
 * **Ground truth is for the demonstrator and the scorer, never for a trained policy's input.**
